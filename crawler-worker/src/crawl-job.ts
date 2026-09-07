@@ -1,4 +1,4 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { commitDownloadedFile } from './file-store.ts';
 import { downloadPdf, type DownloadedPdf } from './pdf-downloader.ts';
@@ -23,6 +23,7 @@ export type CandidateRepo = {
     sha256: string; storageKey: string; mimeType: string; byteSize: number;
     preferredTitle: string | null; preferredFilename: string | null; documentNumber: string | null;
   }): Promise<{ document: { id: string; storageKey: string }; duplicate: boolean }>;
+  upsertDocumentBlob(input: { documentId: string; sha256: string; content: Buffer }): Promise<void>;
   upsertDocumentSource(input: {
     documentId: string; sourceUrl: string; normalizedSourceUrl: string; sourceHost: string;
     referrerUrl: string | null; anchorText: string | null; httpFilename: string | null; lastHttpStatus: number | null;
@@ -69,6 +70,8 @@ export async function processDocumentCandidate(candidate: DocumentCandidate, dep
       preferredFilename: downloaded.httpFilename,
       documentNumber,
     });
+    const content = await readFile(committed.absolutePath);
+    await deps.repo.upsertDocumentBlob({ documentId: upserted.document.id, sha256: downloaded.sha256, content });
     await deps.repo.upsertDocumentSource({
       documentId: upserted.document.id,
       sourceUrl: downloaded.finalUrl,
