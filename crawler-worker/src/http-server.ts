@@ -1,16 +1,14 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
-import { resolve, sep } from 'node:path';
-import type { DocumentRepository, SeedSite } from './repositories.ts';
+import { mkdir, readFile, stat, unlink } from 'node:fs/promises';
+import { join, resolve, sep } from 'node:path';
+import { commitDownloadedFile } from './file-store.ts';
+import { downloadPdf } from './pdf-downloader.ts';
+import type { DocumentRecord, DocumentRepository, SeedSite } from './repositories.ts';
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = Buffer.from(JSON.stringify(body));
-  res.writeHead(status, {
-    'content-type': 'application/json; charset=utf-8',
-    'content-length': String(payload.length),
-    'cache-control': 'no-store',
-  });
+  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'content-length': String(payload.length), 'cache-control': 'no-store' });
   res.end(payload);
 }
 
@@ -30,8 +28,7 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
 }
 
 function authorized(req: IncomingMessage, token: string): boolean {
-  const header = req.headers.authorization ?? '';
-  return header === `Bearer ${token}`;
+  return (req.headers.authorization ?? '') === `Bearer ${token}`;
 }
 
 function safeFilename(input: string | null | undefined): string {
@@ -43,54 +40,87 @@ function parseLimit(url: URL, max = 50): number {
   return Math.min(max, Math.max(1, Number(url.searchParams.get('limit') ?? 20) || 20));
 }
 
+function pdfHeaders(doc: DocumentRecord, byteLength: number, disposition: 'attachment' | 'inline'): Record<string, string> {
+  const filename = safeFilename(doc.preferredFilename ?? doc.preferredTitle);
+  return {
+    'content-type': 'application/pdf',
+    'content-length': String(byteLength),
+    'content-disposition': `${disposition}; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+    'x-content-type-options': 'nosniff',
+    'cache-control': disposition === 'inline' ? 'public, max-age=3600' : 'private, max-age=0, must-revalidate',
+  };
+}
+
 async function sendDocumentSearch(res: ServerResponse, repo: DocumentRepository, q: string, limit: number, publicPath: boolean): Promise<void> {
   const rows = await repo.searchDocuments(q, limit);
   sendJson(res, 200, {
     query: q,
     results: rows.map((row) => ({
-      origin: 'library',
-      id: row.id,
+      origin: 'library', id: row.id,
       title: row.preferredTitle ?? row.preferredFilename ?? row.documentNumber ?? '未命名 PDF',
-      filename: row.preferredFilename,
-      documentNumber: row.documentNumber,
-      byteSize: row.byteSize,
-      sourceCount: row.sourceCount,
-      score: row.score,
+      filename: row.preferredFilename, documentNumber: row.documentNumber, byteSize: row.byteSize,
+      sourceCount: row.sourceCount, score: row.score,
       downloadPath: publicPath ? `/public/file?id=${encodeURIComponent(row.id)}` : `/v1/documents/${row.id}/file`,
     })),
   });
 }
 
-async function streamStoredPdf(res: ServerResponse, repo: DocumentRepository, dataRoot: string, documentId: string, disposition: 'attachment' | 'inline'): Promise<void> {
+async function recoverDocumentBlob(doc: DocumentRecord, repo: DocumentRepository, dataRoot: string): Promise<Buffer | null> {
+  const sources = await repo.getDocumentSources(doc.id);
+  const tempDir = join(dataRoot, 'tmp');
+  await mkdir(tempDir, { recursive: true });
+  for (const source of sources) {
+    const seed = await repo.findSeedForHost(source.sourceHost).catch(() => null);
+    if (!seed?.enabled) continue;
+    try {
+      const downloaded = await downloadPdf({
+        url: source.sourceUrl,
+        tempDir,
+        maxBytes: seed.maxPdfBytes,
+        allowedHosts: seed.allowedHosts,
+      });
+      if (downloaded.sha256 !== doc.sha256) {
+        await unlink(downloaded.tempPath).catch(() => undefined);
+        continue;
+      }
+      const committed = await commitDownloadedFile(downloaded.tempPath, downloaded.sha256, dataRoot);
+      const content = await readFile(committed.absolutePath);
+      await repo.upsertDocumentBlob({ documentId: doc.id, sha256: doc.sha256, content });
+      return content;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+async function streamStoredPdf(
+  res: ServerResponse,
+  repo: DocumentRepository,
+  dataRoot: string,
+  documentId: string,
+  disposition: 'attachment' | 'inline',
+  recover: (doc: DocumentRecord) => Promise<Buffer | null>,
+): Promise<void> {
   const doc = await repo.getDocumentById(documentId);
-  if (!doc) {
-    sendJson(res, 404, { error: 'document not found' });
-    return;
-  }
-  if (!doc.storageKey.startsWith('pdfs/')) {
-    sendJson(res, 500, { error: 'invalid storage key' });
-    return;
-  }
+  if (!doc) return sendJson(res, 404, { error: 'document not found' });
+  if (!doc.storageKey.startsWith('pdfs/')) return sendJson(res, 500, { error: 'invalid storage key' });
   const root = resolve(dataRoot);
   const absolute = resolve(root, doc.storageKey);
-  if (!absolute.startsWith(root + sep)) {
-    sendJson(res, 500, { error: 'invalid storage path' });
-    return;
-  }
+  if (!absolute.startsWith(root + sep)) return sendJson(res, 500, { error: 'invalid storage path' });
+
   const info = await stat(absolute).catch(() => null);
-  if (!info?.isFile()) {
-    sendJson(res, 404, { error: 'stored file missing' });
+  if (info?.isFile()) {
+    res.writeHead(200, pdfHeaders(doc, info.size, disposition));
+    createReadStream(absolute).pipe(res);
     return;
   }
-  const filename = safeFilename(doc.preferredFilename ?? doc.preferredTitle);
-  res.writeHead(200, {
-    'content-type': 'application/pdf',
-    'content-length': String(info.size),
-    'content-disposition': `${disposition}; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
-    'x-content-type-options': 'nosniff',
-    'cache-control': disposition === 'inline' ? 'public, max-age=3600' : 'private, max-age=0, must-revalidate',
-  });
-  createReadStream(absolute).pipe(res);
+
+  let blob = await repo.getDocumentBlob(documentId);
+  if (!blob) blob = await recover(doc);
+  if (!blob) return sendJson(res, 404, { error: 'stored file missing' });
+  res.writeHead(200, pdfHeaders(doc, blob.length, disposition));
+  res.end(blob);
 }
 
 export function createHttpServer(deps: {
@@ -100,7 +130,9 @@ export function createHttpServer(deps: {
   healthCheck: () => Promise<boolean>;
   enqueueJob: (jobId: string) => Promise<void>;
   enqueueIngest?: (jobId: string, url: string, referrerUrl: string | null, seed: SeedSite) => Promise<void>;
+  recoverMissingDocument?: (doc: DocumentRecord) => Promise<Buffer | null>;
 }) {
+  const recover = deps.recoverMissingDocument ?? ((doc: DocumentRecord) => recoverDocumentBlob(doc, deps.repo, deps.dataRoot));
   return createServer(async (req, res) => {
     try {
       const base = `http://${req.headers.host ?? 'localhost'}`;
@@ -121,7 +153,7 @@ export function createHttpServer(deps: {
       if (url.pathname === '/public/file' && req.method === 'GET') {
         const id = (url.searchParams.get('id') ?? '').trim();
         if (!/^[0-9a-fA-F-]{36}$/.test(id)) return sendJson(res, 400, { error: 'valid id is required' });
-        await streamStoredPdf(res, deps.repo, deps.dataRoot, id, 'inline');
+        await streamStoredPdf(res, deps.repo, deps.dataRoot, id, 'inline', recover);
         return;
       }
 
@@ -138,7 +170,7 @@ export function createHttpServer(deps: {
 
       const fileMatch = url.pathname.match(/^\/v1\/documents\/([0-9a-fA-F-]+)\/file$/);
       if (fileMatch && req.method === 'GET') {
-        await streamStoredPdf(res, deps.repo, deps.dataRoot, fileMatch[1]!, 'attachment');
+        await streamStoredPdf(res, deps.repo, deps.dataRoot, fileMatch[1]!, 'attachment', recover);
         return;
       }
 
@@ -184,9 +216,7 @@ export function createHttpServer(deps: {
         return sendJson(res, 202, { job });
       }
 
-      if (url.pathname === '/v1/seeds' && req.method === 'GET') {
-        return sendJson(res, 200, { seeds: await deps.repo.listSeedSites() });
-      }
+      if (url.pathname === '/v1/seeds' && req.method === 'GET') return sendJson(res, 200, { seeds: await deps.repo.listSeedSites() });
 
       if (url.pathname === '/v1/seeds' && req.method === 'POST') {
         const body = await readJson(req);
@@ -197,9 +227,7 @@ export function createHttpServer(deps: {
         const allowedHosts = Array.isArray(body.allowedHosts) ? body.allowedHosts.filter((v): v is string => typeof v === 'string') : [baseUrl.hostname.toLowerCase()];
         if (!allowedHosts.includes(baseUrl.hostname.toLowerCase())) allowedHosts.push(baseUrl.hostname.toLowerCase());
         const seed = await deps.repo.createSeedSite({
-          name: body.name,
-          baseUrl: baseUrl.toString(),
-          allowedHosts,
+          name: body.name, baseUrl: baseUrl.toString(), allowedHosts,
           includePatterns: Array.isArray(body.includePatterns) ? body.includePatterns.filter((v): v is string => typeof v === 'string') : [],
           excludePatterns: Array.isArray(body.excludePatterns) ? body.excludePatterns.filter((v): v is string => typeof v === 'string') : [],
           maxDepth: typeof body.maxDepth === 'number' ? body.maxDepth : 4,
