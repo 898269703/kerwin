@@ -10,8 +10,21 @@ const DOC_ID = '51957b6f-92ee-4785-98b5-9b2e34620c37';
 const SHA = 'a'.repeat(64);
 const doc = (size: number) => ({ id: DOC_ID, sha256: SHA, storageKey: `pdfs/aa/aa/${SHA}.pdf`, mimeType: 'application/pdf', byteSize: size, preferredTitle: 'file.pdf', preferredFilename: 'file.pdf', documentNumber: null });
 
-async function requestPublicFile(repo: object, root: string, recoverMissingDocument?: () => Promise<Buffer | null>) {
-  const server = createHttpServer({ repo: repo as never, apiToken: 'secret', dataRoot: root, healthCheck: async () => true, enqueueJob: async () => {}, recoverMissingDocument } as never);
+async function requestPublicFile(
+  repo: object,
+  root: string,
+  recoverMissingDocument?: () => Promise<Buffer | null>,
+  recoverDownload?: (input: unknown) => Promise<unknown>,
+) {
+  const server = createHttpServer({
+    repo: repo as never,
+    apiToken: 'secret',
+    dataRoot: root,
+    healthCheck: async () => true,
+    enqueueJob: async () => {},
+    recoverMissingDocument,
+    recoverDownload,
+  } as never);
   try {
     await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
     const address = server.address();
@@ -68,5 +81,37 @@ test('public file endpoint lazily recovers a legacy document with no disk or dat
     assert.equal(response.status, 200);
     assert.equal(recoveries, 1);
     assert.equal(Buffer.from(await response.arrayBuffer()).subarray(0, 5).toString(), '%PDF-');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('public file endpoint can recover a historical source even when its seed was removed', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pdf-finder-seedless-'));
+  const payload = Buffer.from('%PDF-seedless-recovery');
+  let savedBlob: Buffer | null = null;
+  let downloads = 0;
+  try {
+    const repo = {
+      async getDocumentById() { return doc(payload.length); },
+      async getDocumentBlob() { return null; },
+      async getDocumentSources() {
+        return [{ sourceUrl: 'https://recover.invalid/file.pdf', sourceHost: 'recover.invalid', anchorText: 'file.pdf', firstSeenAt: '', lastSeenAt: '' }];
+      },
+      async findSeedForHost() { return null; },
+      async upsertDocumentBlob(input: { content: Buffer }) { savedBlob = input.content; },
+    };
+    const response = await requestPublicFile(repo, root, undefined, async () => {
+      downloads += 1;
+      const tempPath = join(root, 'tmp', 'seedless.part');
+      await writeFile(tempPath, payload);
+      return {
+        sourceUrl: 'https://recover.invalid/file.pdf', tempPath,
+        finalUrl: 'https://recover.invalid/file.pdf', sha256: SHA,
+        byteSize: payload.length, contentType: 'application/pdf', httpFilename: 'file.pdf', statusCode: 200,
+      };
+    });
+    assert.equal(response.status, 200);
+    assert.equal(downloads, 1);
+    assert.ok(savedBlob);
+    assert.equal(savedBlob!.subarray(0, 5).toString(), '%PDF-');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
