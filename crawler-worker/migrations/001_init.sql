@@ -67,6 +67,16 @@ CREATE INDEX IF NOT EXISTS documents_title_trgm_idx ON documents USING gin (pref
 CREATE INDEX IF NOT EXISTS documents_filename_trgm_idx ON documents USING gin (preferred_filename gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS documents_number_trgm_idx ON documents USING gin (document_number_normalized gin_trgm_ops);
 
+CREATE TABLE IF NOT EXISTS document_blobs (
+  document_id UUID PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+  sha256 CHAR(64) NOT NULL,
+  byte_size BIGINT NOT NULL,
+  content BYTEA NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS document_blobs_sha_idx ON document_blobs(sha256);
+
 CREATE TABLE IF NOT EXISTS document_sources (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
