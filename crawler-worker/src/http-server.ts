@@ -39,6 +39,60 @@ function safeFilename(input: string | null | undefined): string {
   return value || 'document.pdf';
 }
 
+function parseLimit(url: URL, max = 50): number {
+  return Math.min(max, Math.max(1, Number(url.searchParams.get('limit') ?? 20) || 20));
+}
+
+async function sendDocumentSearch(res: ServerResponse, repo: DocumentRepository, q: string, limit: number, publicPath: boolean): Promise<void> {
+  const rows = await repo.searchDocuments(q, limit);
+  sendJson(res, 200, {
+    query: q,
+    results: rows.map((row) => ({
+      origin: 'library',
+      id: row.id,
+      title: row.preferredTitle ?? row.preferredFilename ?? row.documentNumber ?? '未命名 PDF',
+      filename: row.preferredFilename,
+      documentNumber: row.documentNumber,
+      byteSize: row.byteSize,
+      sourceCount: row.sourceCount,
+      score: row.score,
+      downloadPath: publicPath ? `/public/file?id=${encodeURIComponent(row.id)}` : `/v1/documents/${row.id}/file`,
+    })),
+  });
+}
+
+async function streamStoredPdf(res: ServerResponse, repo: DocumentRepository, dataRoot: string, documentId: string, disposition: 'attachment' | 'inline'): Promise<void> {
+  const doc = await repo.getDocumentById(documentId);
+  if (!doc) {
+    sendJson(res, 404, { error: 'document not found' });
+    return;
+  }
+  if (!doc.storageKey.startsWith('pdfs/')) {
+    sendJson(res, 500, { error: 'invalid storage key' });
+    return;
+  }
+  const root = resolve(dataRoot);
+  const absolute = resolve(root, doc.storageKey);
+  if (!absolute.startsWith(root + sep)) {
+    sendJson(res, 500, { error: 'invalid storage path' });
+    return;
+  }
+  const info = await stat(absolute).catch(() => null);
+  if (!info?.isFile()) {
+    sendJson(res, 404, { error: 'stored file missing' });
+    return;
+  }
+  const filename = safeFilename(doc.preferredFilename ?? doc.preferredTitle);
+  res.writeHead(200, {
+    'content-type': 'application/pdf',
+    'content-length': String(info.size),
+    'content-disposition': `${disposition}; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+    'x-content-type-options': 'nosniff',
+    'cache-control': disposition === 'inline' ? 'public, max-age=3600' : 'private, max-age=0, must-revalidate',
+  });
+  createReadStream(absolute).pipe(res);
+}
+
 export function createHttpServer(deps: {
   repo: DocumentRepository;
   apiToken: string;
@@ -57,6 +111,20 @@ export function createHttpServer(deps: {
         return sendJson(res, ok ? 200 : 503, { ok });
       }
 
+      if (url.pathname === '/public/search' && req.method === 'GET') {
+        const q = (url.searchParams.get('q') ?? '').trim();
+        if (!q || q.length > 200) return sendJson(res, 400, { error: 'q is required and must be <= 200 characters' });
+        await sendDocumentSearch(res, deps.repo, q, parseLimit(url, 20), true);
+        return;
+      }
+
+      if (url.pathname === '/public/file' && req.method === 'GET') {
+        const id = (url.searchParams.get('id') ?? '').trim();
+        if (!/^[0-9a-fA-F-]{36}$/.test(id)) return sendJson(res, 400, { error: 'valid id is required' });
+        await streamStoredPdf(res, deps.repo, deps.dataRoot, id, 'inline');
+        return;
+      }
+
       if (url.pathname.startsWith('/v1/') && !authorized(req, deps.apiToken)) {
         return sendJson(res, 401, { error: 'unauthorized' });
       }
@@ -64,43 +132,13 @@ export function createHttpServer(deps: {
       if (url.pathname === '/v1/documents/search' && req.method === 'GET') {
         const q = (url.searchParams.get('q') ?? '').trim();
         if (!q) return sendJson(res, 400, { error: 'q is required' });
-        const limit = Math.min(50, Math.max(1, Number(url.searchParams.get('limit') ?? 20) || 20));
-        const rows = await deps.repo.searchDocuments(q, limit);
-        return sendJson(res, 200, {
-          query: q,
-          results: rows.map((row) => ({
-            origin: 'library',
-            id: row.id,
-            title: row.preferredTitle ?? row.preferredFilename ?? row.documentNumber ?? '未命名 PDF',
-            filename: row.preferredFilename,
-            documentNumber: row.documentNumber,
-            byteSize: row.byteSize,
-            sourceCount: row.sourceCount,
-            score: row.score,
-            downloadPath: `/v1/documents/${row.id}/file`,
-          })),
-        });
+        await sendDocumentSearch(res, deps.repo, q, parseLimit(url), false);
+        return;
       }
 
       const fileMatch = url.pathname.match(/^\/v1\/documents\/([0-9a-fA-F-]+)\/file$/);
       if (fileMatch && req.method === 'GET') {
-        const doc = await deps.repo.getDocumentById(fileMatch[1]!);
-        if (!doc) return sendJson(res, 404, { error: 'document not found' });
-        if (!doc.storageKey.startsWith('pdfs/')) return sendJson(res, 500, { error: 'invalid storage key' });
-        const root = resolve(deps.dataRoot);
-        const absolute = resolve(root, doc.storageKey);
-        if (!absolute.startsWith(root + sep)) return sendJson(res, 500, { error: 'invalid storage path' });
-        const info = await stat(absolute).catch(() => null);
-        if (!info?.isFile()) return sendJson(res, 404, { error: 'stored file missing' });
-        const filename = safeFilename(doc.preferredFilename);
-        res.writeHead(200, {
-          'content-type': 'application/pdf',
-          'content-length': String(info.size),
-          'content-disposition': `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
-          'x-content-type-options': 'nosniff',
-          'cache-control': 'private, max-age=0, must-revalidate',
-        });
-        createReadStream(absolute).pipe(res);
+        await streamStoredPdf(res, deps.repo, deps.dataRoot, fileMatch[1]!, 'attachment');
         return;
       }
 
