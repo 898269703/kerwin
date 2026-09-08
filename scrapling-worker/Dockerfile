@@ -22,7 +22,10 @@ RUN pip install --no-cache-dir \
 RUN scrapling install
 
 COPY . .
-RUN pytest -q && python -m compileall -q app
+# Keep the verification step explicit and observable in Railway build logs.
+RUN python -m pytest -q --cache-clear \
+  && python -m compileall -q app \
+  && python -c "from app.spider import PdfDiscoverySpider; from app.dynamic_policy import needs_dynamic_fallback; print('scrapling-dynamic-verification-ok')"
 
 EXPOSE 3001
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-3001}"]
