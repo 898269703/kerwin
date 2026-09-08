@@ -8,6 +8,7 @@ from scrapling.spiders import Request, Response, Spider
 from .dynamic_policy import make_browser_page_setup, needs_dynamic_fallback
 from .link_policy import (
     classify_link,
+    is_non_html_asset_url,
     is_url_within_seed_scope,
     should_accept_pdf_candidate,
     should_follow,
@@ -68,14 +69,16 @@ class PdfDiscoverySpider(Spider):
     async def _parse_response(self, response: Response, *, allow_dynamic_retry: bool):
         depth = int(response.meta.get("depth", 0))
         self._page_count += 1
+        response_url = str(response.url)
         content_type = response.headers.get("content-type", "") if response.headers else ""
         mime_type = content_type.split(";", 1)[0].strip().lower()
-        is_html = not mime_type or mime_type in {"text/html", "application/xhtml+xml"}
+        mime_allows_html = not mime_type or mime_type in {"text/html", "application/xhtml+xml"}
+        is_html = mime_allows_html and not is_non_html_asset_url(response_url)
         title = response.css("title::text").get("") if is_html else ""
         fetch_mode = getattr(getattr(response, "request", None), "sid", "") or "http"
         yield {
             "kind": "page",
-            "url": str(response.url),
+            "url": response_url,
             "statusCode": int(response.status),
             "contentType": content_type,
             "depth": depth,
@@ -92,15 +95,15 @@ class PdfDiscoverySpider(Spider):
                 pass
             return
 
-        # Binary/text assets are useful crawl records but are not DOM pages. Avoid
-        # CSS parsing and browser fallback for them even if a server returns 200.
+        # Binary/text assets are useful crawl records but are not DOM pages. URL type
+        # also wins over misleading server MIME headers for known non-HTML extensions.
         if not is_html:
             return
 
         # If no explicit include regexes were supplied, a redirect must not silently
         # widen a directory seed into a whole-host crawl. We still record the page so
         # operators can see the redirect target, but we do not extract from it.
-        if self.include_patterns_cfg == [] and not is_url_within_seed_scope(str(response.url), self.start_url):
+        if self.include_patterns_cfg == [] and not is_url_within_seed_scope(response_url, self.start_url):
             return
 
         html_link_count = 0
@@ -110,7 +113,7 @@ class PdfDiscoverySpider(Spider):
             href = anchor.css("::attr(href)").get()
             if not href:
                 continue
-            absolute = urljoin(str(response.url), href)
+            absolute = urljoin(response_url, href)
             text = anchor.get_all_text(strip=True) if hasattr(anchor, "get_all_text") else ""
 
             # A directly discovered file candidate is allowed to live on a CDN or
@@ -125,7 +128,7 @@ class PdfDiscoverySpider(Spider):
                 yield {
                     "kind": "pdf",
                     "url": absolute,
-                    "referrerUrl": str(response.url),
+                    "referrerUrl": response_url,
                     "anchorText": text or None,
                     "depth": depth,
                 }
@@ -162,7 +165,7 @@ class PdfDiscoverySpider(Spider):
             # Session ID participates in Scrapling's request fingerprint, so the same URL
             # can safely be revisited through the browser after the static HTTP request.
             yield Request(
-                str(response.url),
+                response_url,
                 sid="dynamic",
                 callback=self.parse_dynamic,
                 meta={"depth": depth},
