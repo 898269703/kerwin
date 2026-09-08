@@ -93,7 +93,7 @@ async def test_upsert_blob_marks_storage_hybrid():
 
 
 @pytest.mark.asyncio
-async def test_worker_restart_marks_interrupted_running_jobs_failed():
+async def test_worker_restart_marks_interrupted_and_orphaned_jobs_failed():
     db = FakeDb()
     repo = Repository(db)
 
@@ -102,9 +102,11 @@ async def test_worker_restart_marks_interrupted_running_jobs_failed():
     execute_calls = [call for call in db.calls if call[0] == "execute"]
     assert len(execute_calls) == 1
     _, sql, params = execute_calls[0]
-    assert "status='running'" in sql
-    assert "status='failed'" in sql
-    assert "finished_at=now()" in sql
+    compact_sql = " ".join(sql.split()).lower()
+    assert "status='failed'" in compact_sql
+    assert "finished_at=now()" in compact_sql
+    assert "queued" in compact_sql
+    assert "running" in compact_sql
     assert "worker restarted before completion" in params
 
 
