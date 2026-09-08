@@ -22,6 +22,38 @@ class FakeRepo:
         self.pages.append(page)
 
 
+class SchedulerRepo(FakeRepo):
+    def __init__(self):
+        super().__init__()
+        self.created = []
+
+    async def list_due_seed_sites(self, limit=10):
+        return [{
+            "id": "seed-due",
+            "name": "Due",
+            "baseUrl": "https://example.com/docs/",
+            "allowedHosts": ["example.com"],
+            "includePatterns": [],
+            "excludePatterns": [],
+            "maxDepth": 2,
+            "maxRequestsPerMinute": 30,
+            "maxConcurrency": 1,
+            "maxPdfBytes": 10_000_000,
+            "crawlIntervalMinutes": 60,
+            "enabled": True,
+        }]
+
+    async def create_crawl_job_if_idle(self, seed_site_id, trigger_type, start_url):
+        self.created.append((seed_site_id, trigger_type, start_url))
+        return {
+            "id": "scheduled-job-1",
+            "seedSiteId": seed_site_id,
+            "triggerType": trigger_type,
+            "startUrl": start_url,
+            "status": "queued",
+        }
+
+
 @pytest.mark.asyncio
 async def test_job_runner_marks_success_and_isolates_failures():
     repo = FakeRepo()
@@ -44,12 +76,44 @@ async def test_job_runner_marks_success_and_isolates_failures():
 @pytest.mark.asyncio
 async def test_worker_start_recovers_interrupted_jobs_before_accepting_work():
     repo = FakeRepo()
-    crawler = CrawlerJobs(repo, SimpleNamespace())
+    crawler = CrawlerJobs(repo, SimpleNamespace(scheduler_enabled=False))
 
     await crawler.start()
     await crawler.stop()
 
     assert repo.recovery_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_scheduler_enqueues_due_seed_without_duplicate_active_job():
+    repo = SchedulerRepo()
+    crawler = CrawlerJobs(repo, SimpleNamespace(scheduler_enabled=True, scheduler_poll_seconds=60))
+
+    count = await crawler._schedule_due_seeds_once()
+
+    assert count == 1
+    assert repo.created == [("seed-due", "seed", "https://example.com/docs/")]
+    assert crawler.queue.qsize() == 1
+    queued = await crawler.queue.get()
+    assert queued.job_id == "scheduled-job-1"
+    assert queued.mode == "seed"
+    crawler.queue.task_done()
+
+
+@pytest.mark.asyncio
+async def test_scheduler_skips_seed_when_atomic_claim_returns_none():
+    repo = SchedulerRepo()
+
+    async def already_active(*_args):
+        return None
+
+    repo.create_crawl_job_if_idle = already_active
+    crawler = CrawlerJobs(repo, SimpleNamespace(scheduler_enabled=True, scheduler_poll_seconds=60))
+
+    count = await crawler._schedule_due_seeds_once()
+
+    assert count == 0
+    assert crawler.queue.qsize() == 0
 
 
 @pytest.mark.asyncio
@@ -89,6 +153,7 @@ async def test_seed_crawl_persists_progress_while_streaming(monkeypatch):
         max_job_seconds=60,
         user_agent="test",
         data_dir="/tmp",
+        scheduler_enabled=False,
     )
     crawler = CrawlerJobs(repo, settings)
     item = SimpleNamespace(
