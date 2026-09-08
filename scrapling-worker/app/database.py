@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from psycopg.rows import dict_row
@@ -8,6 +9,24 @@ from psycopg_pool import AsyncConnectionPool
 
 def migration_paths(migration_dir: Path) -> list[Path]:
     return sorted(path for path in migration_dir.glob("*.sql") if path.is_file())
+
+
+class _ConnectionSession:
+    def __init__(self, conn):
+        self.conn = conn
+
+    async def fetch_all(self, sql: str, params=()):
+        async with self.conn.cursor() as cur:
+            await cur.execute(sql, params)
+            return list(await cur.fetchall())
+
+    async def fetch_one(self, sql: str, params=()):
+        async with self.conn.cursor() as cur:
+            await cur.execute(sql, params)
+            return await cur.fetchone()
+
+    async def execute(self, sql: str, params=()):
+        await self.conn.execute(sql, params)
 
 
 class Database:
@@ -26,6 +45,12 @@ class Database:
         async with self.pool.connection() as conn:
             await conn.execute(sql)
             await conn.commit()
+
+    @asynccontextmanager
+    async def transaction(self):
+        async with self.pool.connection() as conn:
+            async with conn.transaction():
+                yield _ConnectionSession(conn)
 
     async def fetch_all(self, sql: str, params=()):
         async with self.pool.connection() as conn:
