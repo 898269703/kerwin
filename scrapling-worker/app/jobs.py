@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable
 from urllib.parse import urlsplit
 
+from .link_policy import candidate_download_hosts
 from .pdf_store import download_pdf, normalize_url, persist_pdf
 from .spider import PdfDiscoverySpider
 
@@ -147,8 +148,13 @@ class CrawlerJobs:
                 ingestion_status="queued",
             )
             try:
+                # The candidate was discovered on an already allowed HTML page. Permit
+                # its exact host for this file download only; recursive crawling remains
+                # limited to the seed site's allowed hosts. download_pdf still performs
+                # DNS/private-network validation and revalidates every redirect.
+                download_hosts = candidate_download_hosts(url, set(seed["allowedHosts"]))
                 pdf = await download_pdf(
-                    url=url, allowed_hosts=set(seed["allowedHosts"]),
+                    url=url, allowed_hosts=download_hosts,
                     max_bytes=min(seed["maxPdfBytes"], self.settings.max_pdf_bytes), user_agent=self.settings.user_agent,
                 )
                 stored = await persist_pdf(repo=self.repo, downloaded=pdf, data_dir=self.settings.data_dir,
