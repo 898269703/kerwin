@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from pathlib import Path
 
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
+
+
+def migration_paths(migration_dir: Path) -> list[Path]:
+    return sorted(path for path in migration_dir.glob("*.sql") if path.is_file())
 
 
 class Database:
