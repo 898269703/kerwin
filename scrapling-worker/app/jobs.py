@@ -120,45 +120,77 @@ class CrawlerJobs:
             max_pdfs=self.settings.max_pdfs_per_job,
             max_concurrency=seed["maxConcurrency"],
             max_requests_per_minute=seed["maxRequestsPerMinute"],
+            max_dynamic_pages=self.settings.max_dynamic_pages,
             include_patterns=seed["includePatterns"],
             exclude_patterns=seed["excludePatterns"],
         )
-        result = await asyncio.to_thread(spider.start)
         pages = discovered = downloaded_count = duplicates = errors = 0
         error_messages: list[str] = []
 
-        for crawl_item in result.items:
+        async def persist_progress():
+            await self.repo.update_crawl_job(
+                item.job_id,
+                pages_fetched=pages,
+                files_discovered=discovered,
+                files_downloaded=downloaded_count,
+                duplicates_found=duplicates,
+                errors_count=errors,
+                error_summary="\n".join(error_messages)[:2000] if error_messages else None,
+            )
+
+        async def consume(crawl_item: dict):
+            nonlocal pages, discovered, downloaded_count, duplicates, errors
+
             if crawl_item.get("kind") == "page":
                 pages += 1
                 await self.repo.record_crawl_page(
-                    job_id=item.job_id, url=crawl_item["url"], normalized_url=normalize_url(crawl_item["url"]),
-                    status_code=crawl_item.get("statusCode"), content_type=crawl_item.get("contentType"),
-                    depth=int(crawl_item.get("depth", 0)), page_title=crawl_item.get("pageTitle"), error=None,
+                    job_id=item.job_id,
+                    url=crawl_item["url"],
+                    normalized_url=normalize_url(crawl_item["url"]),
+                    status_code=crawl_item.get("statusCode"),
+                    content_type=crawl_item.get("contentType"),
+                    depth=int(crawl_item.get("depth", 0)),
+                    page_title=crawl_item.get("pageTitle"),
+                    error=None,
                 )
-                continue
+                await persist_progress()
+                return
+
             if crawl_item.get("kind") != "pdf":
-                continue
+                return
+
             discovered += 1
             url = crawl_item["url"]
             normalized = normalize_url(url)
             host = (urlsplit(url).hostname or "").lower()
             await self.repo.upsert_discovered_link(
-                url=url, normalized_url=normalized, referrer_url=crawl_item.get("referrerUrl"),
-                source_host=host, anchor_text=crawl_item.get("anchorText"), likely_document=True,
+                url=url,
+                normalized_url=normalized,
+                referrer_url=crawl_item.get("referrerUrl"),
+                source_host=host,
+                anchor_text=crawl_item.get("anchorText"),
+                likely_document=True,
                 ingestion_status="queued",
             )
             try:
-                # The candidate was discovered on an already allowed HTML page. Permit
-                # its exact host for this file download only; recursive crawling remains
-                # limited to the seed site's allowed hosts. download_pdf still performs
-                # DNS/private-network validation and revalidates every redirect.
+                # Directly discovered attachments may live on a CDN. Only that exact
+                # candidate host is added for this download; recursive HTML traversal
+                # remains bounded by the seed host/path and the downloader still blocks
+                # private IPs and revalidates redirects.
                 download_hosts = candidate_download_hosts(url, set(seed["allowedHosts"]))
                 pdf = await download_pdf(
-                    url=url, allowed_hosts=download_hosts,
-                    max_bytes=min(seed["maxPdfBytes"], self.settings.max_pdf_bytes), user_agent=self.settings.user_agent,
+                    url=url,
+                    allowed_hosts=download_hosts,
+                    max_bytes=min(seed["maxPdfBytes"], self.settings.max_pdf_bytes),
+                    user_agent=self.settings.user_agent,
                 )
-                stored = await persist_pdf(repo=self.repo, downloaded=pdf, data_dir=self.settings.data_dir,
-                                           referrer_url=crawl_item.get("referrerUrl"), anchor_text=crawl_item.get("anchorText"))
+                stored = await persist_pdf(
+                    repo=self.repo,
+                    downloaded=pdf,
+                    data_dir=self.settings.data_dir,
+                    referrer_url=crawl_item.get("referrerUrl"),
+                    anchor_text=crawl_item.get("anchorText"),
+                )
                 await self.repo.mark_discovered_status(normalized, "downloaded")
                 downloaded_count += 1
                 if stored["duplicate"]:
@@ -167,10 +199,26 @@ class CrawlerJobs:
                 errors += 1
                 error_messages.append(f"{url}: {exc}")
                 await self.repo.mark_discovered_status(normalized, "failed")
+            await persist_progress()
 
-        await self.repo.update_crawl_job(
-            item.job_id, pages_fetched=pages, files_discovered=discovered,
-            files_downloaded=downloaded_count, duplicates_found=duplicates, errors_count=errors,
-            error_summary="\n".join(error_messages)[:2000] if error_messages else None,
-        )
+        timed_out = False
+        try:
+            # Scrapling's stream() API yields each item immediately and exposes live
+            # crawl statistics. This avoids holding the entire crawl in memory and lets
+            # the API report useful progress while a long crawl is still running.
+            async with asyncio.timeout(self.settings.max_job_seconds):
+                async for crawl_item in spider.stream():
+                    await consume(crawl_item)
+        except TimeoutError:
+            timed_out = True
+            errors += 1
+            error_messages.append(f"crawl exceeded {self.settings.max_job_seconds}s runtime limit")
+            try:
+                spider.pause()
+            except RuntimeError:
+                pass
+
+        await persist_progress()
+        if timed_out:
+            return "partial" if (pages or discovered or downloaded_count) else "failed"
         return "partial" if errors else "succeeded"
