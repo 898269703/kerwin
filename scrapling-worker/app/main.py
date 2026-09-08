@@ -5,7 +5,7 @@ from pathlib import Path
 
 from .api import create_app
 from .config import Settings
-from .database import Database
+from .database import Database, migration_paths
 from .jobs import CrawlerJobs
 from .repository import Repository
 
@@ -14,10 +14,6 @@ settings = Settings.from_env()
 db = Database(settings.database_url)
 repo = Repository(db)
 jobs = CrawlerJobs(repo, settings)
-
-
-def migration_paths(migration_dir: Path) -> list[Path]:
-    return sorted(path for path in migration_dir.glob("*.sql") if path.is_file())
 
 
 async def health_check() -> bool:
