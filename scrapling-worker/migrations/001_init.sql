@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS seed_sites (
   max_requests_per_minute INT NOT NULL DEFAULT 30,
   max_concurrency INT NOT NULL DEFAULT 2,
   max_pdf_bytes BIGINT NOT NULL DEFAULT 104857600,
+  crawl_interval_minutes INT NOT NULL DEFAULT 0,
   enabled BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -105,3 +106,15 @@ CREATE TABLE IF NOT EXISTS discovered_links (
   discovered_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Existing deployments predate per-seed scheduling, so keep this migration
+-- idempotent and additive instead of introducing a destructive schema reset.
+ALTER TABLE seed_sites
+  ADD COLUMN IF NOT EXISTS crawl_interval_minutes INT NOT NULL DEFAULT 0;
+
+CREATE INDEX IF NOT EXISTS seed_sites_scheduler_idx
+  ON seed_sites (enabled, crawl_interval_minutes)
+  WHERE enabled=TRUE AND crawl_interval_minutes > 0;
+
+CREATE INDEX IF NOT EXISTS crawl_jobs_seed_status_idx
+  ON crawl_jobs (seed_site_id, status);
