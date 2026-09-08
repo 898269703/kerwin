@@ -1,7 +1,7 @@
 # PDF Finder Search-Miss Automatic Crawl Design
 
 Date: 2026-09-08  
-Status: Proposed; implementation starts only after user review  
+Status: Ready for user review; implementation starts only after approval  
 Scope: integrate the existing Vercel PDF Finder search UX with the production Scrapling worker so a library miss can trigger a bounded crawl and surface newly downloaded PDFs without exposing crawler credentials.
 
 ## 1. Decision
@@ -211,9 +211,17 @@ Default search-triggered limits:
 - concurrency 1 per host;
 - max dynamic pages 3;
 - robots.txt obeyed;
-- recursive HTML restricted to the candidate host and candidate path subtree;
+- recursive HTML restricted to the candidate host and derived path scope;
 - external directly linked PDF attachments may be downloaded after provenance/SSRF validation;
 - external HTML pages are never recursively followed.
+
+Derived path scope is deterministic:
+- a directory URL ending in `/` may crawl only that subtree;
+- a file-looking URL such as `/notice/123.html` may crawl only its parent directory, never a parent above it;
+- an extensionless path such as `/notice/123` may crawl only the exact path and descendants;
+- a root URL `/` is still bounded by max 20 pages, depth 2, runtime 120 seconds, and concurrency 1.
+
+The ephemeral runtime policy lives only in the active worker queue item. If the worker restarts, the existing startup recovery marks that orphaned job failed rather than attempting to reconstruct or broaden its crawl scope.
 
 A page crawl that hits a cap returns `partial`, not a process failure.
 
@@ -248,7 +256,7 @@ Response:
 }
 ```
 
-The worker decides direct-ingest vs ephemeral-crawl after validating the URL. Vercel does not tell the worker to weaken safety rules.
+The worker decides direct-ingest vs ephemeral-crawl after validating the URL. The `query` field is context only; it cannot widen host/path scope or disable safety limits. Vercel does not tell the worker to weaken safety rules.
 
 ### 9.2 Job status
 
