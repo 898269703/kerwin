@@ -16,6 +16,10 @@ repo = Repository(db)
 jobs = CrawlerJobs(repo, settings)
 
 
+def migration_paths(migration_dir: Path) -> list[Path]:
+    return sorted(path for path in migration_dir.glob("*.sql") if path.is_file())
+
+
 async def health_check() -> bool:
     return await db.ping()
 
@@ -26,8 +30,9 @@ app = create_app(repo=repo, jobs=jobs, api_token=settings.api_token, health_chec
 @asynccontextmanager
 async def lifespan(_app):
     await db.open()
-    migration = Path(__file__).resolve().parent.parent / "migrations" / "001_init.sql"
-    await db.migrate(str(migration))
+    migration_dir = Path(__file__).resolve().parent.parent / "migrations"
+    for migration in migration_paths(migration_dir):
+        await db.migrate(str(migration))
     await jobs.start()
     try:
         yield
