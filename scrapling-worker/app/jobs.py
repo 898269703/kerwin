@@ -42,6 +42,10 @@ class CrawlerJobs:
 
     async def start(self):
         if not self.task:
+            # The queue itself is in-memory. Any DB row left as running belongs to a
+            # previous process instance and can no longer make progress, so close it
+            # before this worker starts accepting new work.
+            await self.repo.fail_interrupted_jobs()
             self.task = asyncio.create_task(self._worker(), name="scrapling-crawl-worker")
 
     async def stop(self):
