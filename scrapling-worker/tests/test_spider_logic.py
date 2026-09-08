@@ -1,4 +1,14 @@
-from app.spider import PdfDiscoverySpider, classify_link, should_accept_pdf_candidate, should_follow
+from types import SimpleNamespace
+
+import pytest
+
+from app.spider import (
+    PdfDiscoverySpider,
+    classify_link,
+    is_url_within_seed_scope,
+    should_accept_pdf_candidate,
+    should_follow,
+)
 
 
 def test_pdf_links_are_candidates():
@@ -65,6 +75,27 @@ def test_exclude_patterns_win():
     )
 
 
+def test_default_seed_scope_does_not_expand_to_whole_host():
+    seed = "https://www.w3.org/TR/REC-html40-971218/"
+    assert is_url_within_seed_scope(
+        "https://www.w3.org/TR/REC-html40-971218/struct/global.html", seed
+    )
+    assert not is_url_within_seed_scope("https://www.w3.org/TR/", seed)
+    assert not should_follow(
+        "https://www.w3.org/TR/",
+        allowed_hosts={"www.w3.org"},
+        depth=1,
+        max_depth=4,
+        include_patterns=[],
+        exclude_patterns=[],
+        scope_url=seed,
+    )
+
+
+def test_root_seed_scope_can_cover_whole_host():
+    assert is_url_within_seed_scope("https://example.com/news/page", "https://example.com/")
+
+
 def test_spider_hard_caps_global_and_per_domain_concurrency():
     spider = PdfDiscoverySpider(
         start_url="https://www.w3.org/",
@@ -80,3 +111,47 @@ def test_spider_hard_caps_global_and_per_domain_concurrency():
 
     assert spider.concurrent_requests == 6
     assert spider.concurrent_requests_per_domain == 2
+
+
+class _EmptySelector:
+    def get(self, default=None):
+        return default
+
+    def __iter__(self):
+        return iter(())
+
+
+class _JsShellResponse:
+    url = "https://example.com/app/"
+    meta = {"depth": 0}
+    status = 200
+    headers = {}
+    request = SimpleNamespace(sid="http")
+
+    def css(self, selector):
+        return _EmptySelector()
+
+    def get(self):
+        return "<html><body><div id='app'></div><script></script></body></html>"
+
+
+@pytest.mark.asyncio
+async def test_dynamic_fallback_has_a_hard_total_page_cap():
+    spider = PdfDiscoverySpider(
+        start_url="https://example.com/app/",
+        allowed_hosts={"example.com"},
+        max_depth=2,
+        max_pages=20,
+        max_pdfs=10,
+        max_concurrency=2,
+        max_requests_per_minute=60,
+        max_dynamic_pages=1,
+        include_patterns=[],
+        exclude_patterns=[],
+    )
+
+    first = [item async for item in spider._parse_response(_JsShellResponse(), allow_dynamic_retry=True)]
+    second = [item async for item in spider._parse_response(_JsShellResponse(), allow_dynamic_retry=True)]
+
+    assert sum(getattr(item, "sid", None) == "dynamic" for item in first) == 1
+    assert sum(getattr(item, "sid", None) == "dynamic" for item in second) == 0
