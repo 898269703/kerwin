@@ -271,6 +271,67 @@ class Repository:
         )
         return self._job(row)
 
+    async def claim_search_discovery_job(self, *, normalized_url: str, start_url: str):
+        active = await self.db.fetch_one(
+            """
+            SELECT * FROM crawl_jobs
+            WHERE normalized_start_url=%s
+              AND status IN ('queued','running')
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (normalized_url,),
+        )
+        if active:
+            job = self._job(active)
+            job["reused"] = True
+            return job
+
+        recent_ok = await self.db.fetch_one(
+            """
+            SELECT * FROM crawl_jobs
+            WHERE normalized_start_url=%s
+              AND status IN ('succeeded','partial')
+              AND created_at >= now() - interval '30 minutes'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (normalized_url,),
+        )
+        if recent_ok:
+            job = self._job(recent_ok)
+            job["reused"] = True
+            return job
+
+        recent_failed = await self.db.fetch_one(
+            """
+            SELECT * FROM crawl_jobs
+            WHERE normalized_start_url=%s
+              AND status='failed'
+              AND created_at >= now() - interval '5 minutes'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (normalized_url,),
+        )
+        if recent_failed:
+            job = self._job(recent_failed)
+            job["reused"] = True
+            return job
+
+        row = await self.db.fetch_one(
+            """
+            INSERT INTO crawl_jobs
+              (seed_site_id, trigger_type, start_url, normalized_start_url, status)
+            VALUES (NULL, 'discovery', %s, %s, 'queued')
+            RETURNING *
+            """,
+            (start_url, normalized_url),
+        )
+        job = self._job(row)
+        job["reused"] = False
+        return job
+
     async def get_crawl_job(self, job_id: str):
         return self._job(await self.db.fetch_one("SELECT * FROM crawl_jobs WHERE id=%s LIMIT 1", (job_id,)))
 
