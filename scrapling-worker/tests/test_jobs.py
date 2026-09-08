@@ -10,6 +10,10 @@ class FakeRepo:
     def __init__(self):
         self.patches = []
         self.pages = []
+        self.recovery_calls = 0
+
+    async def fail_interrupted_jobs(self):
+        self.recovery_calls += 1
 
     async def update_crawl_job(self, job_id, **patch):
         self.patches.append((job_id, patch))
@@ -35,6 +39,17 @@ async def test_job_runner_marks_success_and_isolates_failures():
     assert calls == ["good", "bad"]
     assert any(patch.get("status") == "succeeded" for _, patch in repo.patches)
     assert any(patch.get("status") == "failed" and "boom" in patch.get("error_summary", "") for _, patch in repo.patches)
+
+
+@pytest.mark.asyncio
+async def test_worker_start_recovers_interrupted_jobs_before_accepting_work():
+    repo = FakeRepo()
+    crawler = CrawlerJobs(repo, SimpleNamespace())
+
+    await crawler.start()
+    await crawler.stop()
+
+    assert repo.recovery_calls == 1
 
 
 @pytest.mark.asyncio
