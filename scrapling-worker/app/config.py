@@ -20,6 +20,7 @@ class Settings:
     max_pdfs_per_job: int = 100
     max_pdf_bytes: int = 104_857_600
     max_dynamic_pages: int = 20
+    max_job_seconds: int = 300
     global_concurrency: int = 6
     per_domain_concurrency: int = 2
 
@@ -41,6 +42,7 @@ class Settings:
             max_pdfs_per_job=_bounded_int("MAX_PDFS_PER_JOB", 100, minimum=1, maximum=100),
             max_pdf_bytes=int(os.environ.get("MAX_PDF_BYTES", "104857600")),
             max_dynamic_pages=_bounded_int("MAX_DYNAMIC_PAGES", 20, minimum=0, maximum=20),
+            max_job_seconds=_bounded_int("MAX_JOB_SECONDS", 300, minimum=30, maximum=1800),
             global_concurrency=_bounded_int("GLOBAL_CONCURRENCY", 6, minimum=1, maximum=6),
             per_domain_concurrency=_bounded_int("PER_DOMAIN_CONCURRENCY", 2, minimum=1, maximum=2),
         )
