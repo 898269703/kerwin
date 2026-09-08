@@ -1,4 +1,4 @@
-from app.spider import classify_link, should_accept_pdf_candidate, should_follow
+from app.spider import PdfDiscoverySpider, classify_link, should_accept_pdf_candidate, should_follow
 
 
 def test_pdf_links_are_candidates():
@@ -63,3 +63,20 @@ def test_exclude_patterns_win():
         include_patterns=[],
         exclude_patterns=[r"/private/"],
     )
+
+
+def test_spider_hard_caps_global_and_per_domain_concurrency():
+    spider = PdfDiscoverySpider(
+        start_url="https://www.w3.org/",
+        allowed_hosts={"www.w3.org"},
+        max_depth=4,
+        max_pages=500,
+        max_pdfs=100,
+        max_concurrency=999,
+        max_requests_per_minute=60,
+        include_patterns=[],
+        exclude_patterns=[],
+    )
+
+    assert spider.concurrent_requests == 6
+    assert spider.concurrent_requests_per_domain == 2
