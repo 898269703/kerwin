@@ -149,6 +149,22 @@ class Repository:
         return self._seed(row)
 
     async def create_seed_site(self, data: dict[str, Any]):
+        # Seed counts are small, and preserving the first row is safer than applying a
+        # destructive unique migration while historical duplicates may already exist.
+        # Treat a sole trailing slash as equivalent so repeated setup/smoke calls are
+        # idempotent without changing case-sensitive URL path semantics.
+        existing = await self.db.fetch_one(
+            """
+            SELECT * FROM seed_sites
+            WHERE rtrim(base_url, '/') = rtrim(%s, '/')
+            ORDER BY created_at ASC
+            LIMIT 1
+            """,
+            (data["baseUrl"],),
+        )
+        if existing:
+            return self._seed(existing)
+
         row = await self.db.fetch_one(
             """
             INSERT INTO seed_sites
@@ -175,6 +191,23 @@ class Repository:
 
     async def get_crawl_job(self, job_id: str):
         return self._job(await self.db.fetch_one("SELECT * FROM crawl_jobs WHERE id=%s LIMIT 1", (job_id,)))
+
+    async def fail_interrupted_jobs(self):
+        message = "worker restarted before completion"
+        await self.db.execute(
+            """
+            UPDATE crawl_jobs
+            SET status='failed',
+                errors_count=GREATEST(COALESCE(errors_count, 0), 1),
+                error_summary=CASE
+                  WHEN COALESCE(error_summary, '') = '' THEN %s
+                  ELSE left(error_summary || E'\n' || %s, 2000)
+                END,
+                finished_at=now()
+            WHERE status='running'
+            """,
+            (message, message),
+        )
 
     async def update_crawl_job(self, job_id: str, **patch):
         mapping = {
