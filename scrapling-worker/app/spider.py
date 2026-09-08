@@ -6,7 +6,12 @@ from scrapling.fetchers import AsyncDynamicSession, FetcherSession
 from scrapling.spiders import Request, Response, Spider
 
 from .dynamic_policy import make_browser_page_setup, needs_dynamic_fallback
-from .link_policy import classify_link, should_accept_pdf_candidate, should_follow
+from .link_policy import (
+    classify_link,
+    is_url_within_seed_scope,
+    should_accept_pdf_candidate,
+    should_follow,
+)
 
 
 class PdfDiscoverySpider(Spider):
@@ -19,7 +24,8 @@ class PdfDiscoverySpider(Spider):
 
     def __init__(self, *, start_url: str, allowed_hosts: set[str], max_depth: int,
                  max_pages: int, max_pdfs: int, max_concurrency: int,
-                 max_requests_per_minute: int, include_patterns: list[str] | None = None,
+                 max_requests_per_minute: int, max_dynamic_pages: int = 20,
+                 include_patterns: list[str] | None = None,
                  exclude_patterns: list[str] | None = None):
         super().__init__()
         self.start_url = start_url
@@ -27,8 +33,9 @@ class PdfDiscoverySpider(Spider):
         self.allowed_hosts_cfg = {h.lower() for h in allowed_hosts}
         self.allowed_domains = set(self.allowed_hosts_cfg)
         self.max_depth_cfg = max_depth
-        self.max_pages_cfg = max_pages
-        self.max_pdfs_cfg = max_pdfs
+        self.max_pages_cfg = max(1, max_pages)
+        self.max_pdfs_cfg = max(1, max_pdfs)
+        self.max_dynamic_pages_cfg = max(0, min(20, max_dynamic_pages))
         self.include_patterns_cfg = include_patterns or []
         self.exclude_patterns_cfg = exclude_patterns or []
         self.concurrent_requests = min(6, max(1, max_concurrency))
@@ -36,6 +43,7 @@ class PdfDiscoverySpider(Spider):
         self.download_delay = max(0.0, 60.0 / max(1, max_requests_per_minute))
         self._page_count = 0
         self._pdf_count = 0
+        self._dynamic_page_count = 0
         self._browser_page_setup = make_browser_page_setup()
 
     def configure_sessions(self, manager):
@@ -71,7 +79,20 @@ class PdfDiscoverySpider(Spider):
             "pageTitle": title.strip() if title else None,
             "fetchMode": fetch_mode,
         }
+
         if self._page_count >= self.max_pages_cfg:
+            # Stop already queued work too; returning from this callback alone would
+            # not prevent the scheduler from draining requests queued by earlier pages.
+            try:
+                self.pause()
+            except RuntimeError:
+                pass
+            return
+
+        # If no explicit include regexes were supplied, a redirect must not silently
+        # widen a directory seed into a whole-host crawl. We still record the page so
+        # operators can see the redirect target, but we do not extract from it.
+        if self.include_patterns_cfg == [] and not is_url_within_seed_scope(str(response.url), self.start_url):
             return
 
         html_link_count = 0
@@ -110,9 +131,9 @@ class PdfDiscoverySpider(Spider):
                 max_depth=self.max_depth_cfg,
                 include_patterns=self.include_patterns_cfg,
                 exclude_patterns=self.exclude_patterns_cfg,
+                scope_url=self.start_url,
             ):
                 html_link_count += 1
-                # Construct a fresh HTTP request instead of inheriting browser-only kwargs.
                 yield Request(
                     absolute,
                     sid="http",
@@ -120,11 +141,16 @@ class PdfDiscoverySpider(Spider):
                     meta={"depth": next_depth},
                 )
 
-        if allow_dynamic_retry and needs_dynamic_fallback(
-            html=str(response.get()),
-            html_link_count=html_link_count,
-            pdf_candidate_count=pdf_candidate_count,
+        if (
+            allow_dynamic_retry
+            and self._dynamic_page_count < self.max_dynamic_pages_cfg
+            and needs_dynamic_fallback(
+                html=str(response.get()),
+                html_link_count=html_link_count,
+                pdf_candidate_count=pdf_candidate_count,
+            )
         ):
+            self._dynamic_page_count += 1
             # Session ID participates in Scrapling's request fingerprint, so the same URL
             # can safely be revisited through the browser after the static HTTP request.
             yield Request(
