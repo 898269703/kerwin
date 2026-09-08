@@ -25,6 +25,7 @@ class Repository:
             "maxRequestsPerMinute": int(row.get("max_requests_per_minute") or 30),
             "maxConcurrency": int(row.get("max_concurrency") or 2),
             "maxPdfBytes": int(row.get("max_pdf_bytes") or 104857600),
+            "crawlIntervalMinutes": int(row.get("crawl_interval_minutes") or 0),
             "enabled": bool(row.get("enabled", True)),
         }
 
@@ -138,6 +139,35 @@ class Repository:
         rows = await self.db.fetch_all("SELECT * FROM seed_sites ORDER BY created_at ASC")
         return [self._seed(row) for row in rows]
 
+    async def list_due_seed_sites(self, limit: int = 10):
+        rows = await self.db.fetch_all(
+            """
+            SELECT s.*
+            FROM seed_sites s
+            WHERE s.enabled=TRUE
+              AND s.crawl_interval_minutes > 0
+              AND NOT EXISTS (
+                SELECT 1 FROM crawl_jobs active
+                WHERE active.seed_site_id=s.id
+                  AND active.status IN ('queued','running')
+              )
+              AND COALESCE((
+                SELECT MAX(COALESCE(history.finished_at, history.started_at))
+                FROM crawl_jobs history
+                WHERE history.seed_site_id=s.id
+              ), '-infinity'::timestamptz)
+                  <= now() - make_interval(mins => s.crawl_interval_minutes)
+            ORDER BY COALESCE((
+                SELECT MAX(COALESCE(history.finished_at, history.started_at))
+                FROM crawl_jobs history
+                WHERE history.seed_site_id=s.id
+            ), '-infinity'::timestamptz) ASC, s.created_at ASC
+            LIMIT %s
+            """,
+            (max(1, min(limit, 50)),),
+        )
+        return [self._seed(row) for row in rows]
+
     async def get_seed_site(self, seed_id: str):
         return self._seed(await self.db.fetch_one("SELECT * FROM seed_sites WHERE id=%s LIMIT 1", (seed_id,)))
 
@@ -169,8 +199,9 @@ class Repository:
             """
             INSERT INTO seed_sites
               (name, base_url, allowed_hosts, include_patterns, exclude_patterns,
-               max_depth, max_requests_per_minute, max_concurrency, max_pdf_bytes)
-            VALUES (%s,%s,%s::jsonb,%s::jsonb,%s::jsonb,%s,%s,%s,%s)
+               max_depth, max_requests_per_minute, max_concurrency, max_pdf_bytes,
+               crawl_interval_minutes)
+            VALUES (%s,%s,%s::jsonb,%s::jsonb,%s::jsonb,%s,%s,%s,%s,%s)
             RETURNING *
             """,
             (
@@ -178,7 +209,43 @@ class Repository:
                 json.dumps(data.get("includePatterns", [])), json.dumps(data.get("excludePatterns", [])),
                 data.get("maxDepth", 4), data.get("maxRequestsPerMinute", 30),
                 data.get("maxConcurrency", 2), data.get("maxPdfBytes", 104857600),
+                data.get("crawlIntervalMinutes", 0),
             ),
+        )
+        return self._seed(row)
+
+    async def update_seed_site(self, seed_id: str, **patch):
+        mapping = {
+            "name": "name",
+            "allowed_hosts": "allowed_hosts",
+            "include_patterns": "include_patterns",
+            "exclude_patterns": "exclude_patterns",
+            "max_depth": "max_depth",
+            "max_requests_per_minute": "max_requests_per_minute",
+            "max_concurrency": "max_concurrency",
+            "max_pdf_bytes": "max_pdf_bytes",
+            "crawl_interval_minutes": "crawl_interval_minutes",
+            "enabled": "enabled",
+        }
+        json_fields = {"allowed_hosts", "include_patterns", "exclude_patterns"}
+        sets: list[str] = []
+        values: list[Any] = []
+        for key, column in mapping.items():
+            if key not in patch:
+                continue
+            if key in json_fields:
+                sets.append(f"{column}=%s::jsonb")
+                values.append(json.dumps(patch[key]))
+            else:
+                sets.append(f"{column}=%s")
+                values.append(patch[key])
+        if not sets:
+            return await self.get_seed_site(seed_id)
+        sets.append("updated_at=now()")
+        values.append(seed_id)
+        row = await self.db.fetch_one(
+            f"UPDATE seed_sites SET {', '.join(sets)} WHERE id=%s RETURNING *",
+            tuple(values),
         )
         return self._seed(row)
 
@@ -186,6 +253,21 @@ class Repository:
         row = await self.db.fetch_one(
             "INSERT INTO crawl_jobs (seed_site_id,trigger_type,start_url,status) VALUES (%s,%s,%s,'queued') RETURNING *",
             (seed_site_id, trigger_type, start_url),
+        )
+        return self._job(row)
+
+    async def create_crawl_job_if_idle(self, seed_site_id: str, trigger_type: str, start_url: str):
+        row = await self.db.fetch_one(
+            """
+            INSERT INTO crawl_jobs (seed_site_id,trigger_type,start_url,status)
+            SELECT %s,%s,%s,'queued'
+            WHERE NOT EXISTS (
+              SELECT 1 FROM crawl_jobs
+              WHERE seed_site_id=%s AND status IN ('queued','running')
+            )
+            RETURNING *
+            """,
+            (seed_site_id, trigger_type, start_url, seed_site_id),
         )
         return self._job(row)
 
