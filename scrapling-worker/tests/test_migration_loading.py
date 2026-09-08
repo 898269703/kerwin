@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from app.main import migration_paths
+from app.database import migration_paths
 
 
 def test_migration_paths_load_all_sql_files_in_order(tmp_path: Path):
