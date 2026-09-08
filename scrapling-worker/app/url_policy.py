@@ -17,6 +17,29 @@ def is_private_address(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -
     )
 
 
+def validate_public_candidate_host(hostname: str) -> str:
+    host = hostname.rstrip(".").lower()
+    if not host:
+        raise ValueError("URL hostname is required")
+    if (
+        host == "localhost"
+        or host.endswith(".localhost")
+        or host == "localhost.localdomain"
+        or host.endswith(".localhost.localdomain")
+        or host == "metadata.google.internal"
+        or host.endswith(".metadata.google.internal")
+        or host.endswith(".local")
+    ):
+        raise ValueError("URL hostname is not public")
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return host
+    if is_private_address(address):
+        raise ValueError("URL resolves to a non-public address")
+    return host
+
+
 def _host_allowed(hostname: str, allowed_hosts: set[str]) -> bool:
     host = hostname.rstrip(".").lower()
     return any(host == allowed or host.endswith("." + allowed) for allowed in {h.rstrip('.').lower() for h in allowed_hosts})
@@ -30,6 +53,7 @@ def validate_allowed_url(url: str, allowed_hosts: set[str], *, resolved_ips: lis
         raise ValueError("URL credentials are not allowed")
     if not parsed.hostname:
         raise ValueError("URL hostname is required")
+    validate_public_candidate_host(parsed.hostname)
     if not _host_allowed(parsed.hostname, allowed_hosts):
         raise ValueError("URL host is not allowed")
     if not resolved_ips:
@@ -45,6 +69,7 @@ async def resolve_public_url(url: str, allowed_hosts: set[str]) -> object:
     parsed = urlsplit(url)
     if not parsed.hostname:
         raise ValueError("URL hostname is required")
+    validate_public_candidate_host(parsed.hostname)
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
 
     def _resolve() -> list[str]:
