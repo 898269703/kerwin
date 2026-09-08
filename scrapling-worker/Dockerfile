@@ -18,6 +18,9 @@ RUN pip install --no-cache-dir \
     "pytest==8.4.1" \
     "pytest-asyncio==1.1.0"
 
+# Scrapling fetchers/spiders require their browser + system dependencies.
+RUN scrapling install
+
 COPY . .
 RUN pytest -q && python -m compileall -q app
 
