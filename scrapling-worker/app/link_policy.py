@@ -9,6 +9,11 @@ _LIKELY_PDF_PATH = re.compile(
     re.IGNORECASE,
 )
 _ATTACHMENT_TEXT = re.compile(r"(?:pdf|附件|下载|文件)", re.IGNORECASE)
+_NON_HTML_PATH = re.compile(
+    r"\.(?:dtd|ent|cat|txt|zip|tgz|tar|gz|ps|css|js|xml|json|rss|atom|"
+    r"jpe?g|png|gif|svg|webp|ico|mp3|mp4|webm|woff2?|ttf|eot)(?:$|[?#])",
+    re.IGNORECASE,
+)
 
 
 def classify_link(url: str, anchor_text: str | None = None) -> str:
@@ -109,5 +114,7 @@ def should_follow(
     if any(re.search(pattern, url) for pattern in exclude_patterns):
         return False
     if include_patterns and not any(re.search(pattern, url) for pattern in include_patterns):
+        return False
+    if _NON_HTML_PATH.search(parsed.path):
         return False
     return classify_link(url) == "html"
