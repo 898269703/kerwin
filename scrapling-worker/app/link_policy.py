@@ -10,7 +10,7 @@ _LIKELY_PDF_PATH = re.compile(
 )
 _ATTACHMENT_TEXT = re.compile(r"(?:pdf|附件|下载|文件)", re.IGNORECASE)
 _NON_HTML_PATH = re.compile(
-    r"\.(?:dtd|ent|cat|txt|zip|tgz|tar|gz|ps|css|js|xml|json|rss|atom|"
+    r"\.(?:dtd|ent|cat|decl|txt|zip|tgz|tar|gz|ps|css|js|xml|json|rss|atom|"
     r"jpe?g|png|gif|svg|webp|ico|mp3|mp4|webm|woff2?|ttf|eot)(?:$|[?#])",
     re.IGNORECASE,
 )
@@ -43,6 +43,10 @@ def candidate_download_hosts(url: str, seed_allowed_hosts: set[str]) -> set[str]
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise ValueError("valid HTTP(S) candidate URL required")
     return {host.lower().rstrip(".") for host in seed_allowed_hosts} | {parsed.hostname.lower().rstrip(".")}
+
+
+def is_non_html_asset_url(url: str) -> bool:
+    return bool(_NON_HTML_PATH.search(urlsplit(url).path))
 
 
 def _host_allowed(host: str, allowed_hosts: set[str]) -> bool:
@@ -115,6 +119,6 @@ def should_follow(
         return False
     if include_patterns and not any(re.search(pattern, url) for pattern in include_patterns):
         return False
-    if _NON_HTML_PATH.search(parsed.path):
+    if is_non_html_asset_url(url):
         return False
     return classify_link(url) == "html"
