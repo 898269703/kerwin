@@ -26,8 +26,13 @@ class FakeDb:
 
     async def fetch_one(self, sql, params=()):
         self.calls.append(("fetch_one", sql, params))
-        if "FROM document_blobs" in sql:
-            return {"content": b"%PDF-blob"}
+        if "document_blobs" in sql:
+            return {
+                "id": "doc-1",
+                "preferred_title": "156.pdf",
+                "preferred_filename": "156.pdf",
+                "content": b"%PDF-blob",
+            }
         return None
 
     async def execute(self, sql, params=()):
