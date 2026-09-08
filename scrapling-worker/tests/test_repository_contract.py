@@ -104,6 +104,34 @@ class SeedDedupeDb(FakeDb):
         return await super().fetch_one(sql, params)
 
 
+class SearchDiscoveryDb(FakeDb):
+    def __init__(self, fetch_one_results):
+        super().__init__()
+        self.fetch_one_results = list(fetch_one_results)
+
+    async def fetch_one(self, sql, params=()):
+        self.calls.append(("fetch_one", sql, params))
+        if not self.fetch_one_results:
+            raise AssertionError(f"unexpected fetch_one: {sql}")
+        return self.fetch_one_results.pop(0)
+
+
+def discovery_job(job_id: str, status: str):
+    return {
+        "id": job_id,
+        "seed_site_id": None,
+        "trigger_type": "discovery",
+        "start_url": "https://example.gov/docs/notice",
+        "status": status,
+        "pages_fetched": 3 if status == "running" else 0,
+        "files_discovered": 0,
+        "files_downloaded": 0,
+        "duplicates_found": 0,
+        "errors_count": 0,
+        "error_summary": None,
+    }
+
+
 @pytest.mark.asyncio
 async def test_search_documents_preserves_library_shape():
     repo = Repository(FakeDb())
@@ -212,3 +240,70 @@ async def test_seed_policy_can_be_updated_without_deleting_history():
     _, sql, _ = next(call for call in db.calls if call[0] == "fetch_one" and "UPDATE seed_sites" in call[1])
     assert "DELETE" not in sql.upper()
     assert "updated_at=now()" in sql
+
+
+@pytest.mark.asyncio
+async def test_claim_search_discovery_job_reuses_active_job():
+    db = SearchDiscoveryDb([discovery_job("11111111-1111-1111-1111-111111111111", "running")])
+    repo = Repository(db)
+
+    job = await repo.claim_search_discovery_job(
+        normalized_url="https://example.gov/docs/notice",
+        start_url="https://example.gov/docs/notice",
+    )
+
+    assert job["id"] == "11111111-1111-1111-1111-111111111111"
+    assert job["reused"] is True
+    sql = db.calls[0][1]
+    assert "status IN ('queued','running')" in sql
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["succeeded", "partial"])
+async def test_claim_search_discovery_job_reuses_recent_success_or_partial(status):
+    db = SearchDiscoveryDb([None, discovery_job("22222222-2222-2222-2222-222222222222", status)])
+    repo = Repository(db)
+
+    job = await repo.claim_search_discovery_job(
+        normalized_url="https://example.gov/docs/notice",
+        start_url="https://example.gov/docs/notice",
+    )
+
+    assert job["reused"] is True
+    recent_sql = db.calls[1][1]
+    assert "status IN ('succeeded','partial')" in recent_sql
+    assert "interval '30 minutes'" in recent_sql
+
+
+@pytest.mark.asyncio
+async def test_claim_search_discovery_job_reuses_recent_failure_for_five_minutes():
+    db = SearchDiscoveryDb([None, None, discovery_job("33333333-3333-3333-3333-333333333333", "failed")])
+    repo = Repository(db)
+
+    job = await repo.claim_search_discovery_job(
+        normalized_url="https://example.gov/docs/notice",
+        start_url="https://example.gov/docs/notice",
+    )
+
+    assert job["reused"] is True
+    failed_sql = db.calls[2][1]
+    assert "status='failed'" in failed_sql
+    assert "interval '5 minutes'" in failed_sql
+
+
+@pytest.mark.asyncio
+async def test_claim_search_discovery_job_inserts_when_no_reusable_job():
+    inserted = discovery_job("44444444-4444-4444-4444-444444444444", "queued")
+    db = SearchDiscoveryDb([None, None, None, inserted])
+    repo = Repository(db)
+
+    job = await repo.claim_search_discovery_job(
+        normalized_url="https://example.gov/docs/notice",
+        start_url="https://example.gov/docs/notice",
+    )
+
+    assert job["id"] == "44444444-4444-4444-4444-444444444444"
+    assert job["reused"] is False
+    insert_sql = db.calls[3][1]
+    assert "INSERT INTO crawl_jobs" in insert_sql
+    assert "normalized_start_url" in insert_sql
