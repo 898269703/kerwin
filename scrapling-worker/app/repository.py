@@ -204,7 +204,7 @@ class Repository:
                   ELSE left(error_summary || E'\n' || %s, 2000)
                 END,
                 finished_at=now()
-            WHERE status='running'
+            WHERE status IN ('queued','running')
             """,
             (message, message),
         )
