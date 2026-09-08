@@ -63,14 +63,31 @@ class FakeRepo:
 
 
 class FakeJobs:
+    def __init__(self):
+        self.search_discovery_urls = []
+
     async def enqueue_seed(self, seed_site_id: str, start_url: str | None):
         if seed_site_id == "busy":
             raise RuntimeError("seed already has an active crawl job")
         return {"id": "job-1", "seedSiteId": seed_site_id, "status": "queued"}
 
+    async def enqueue_search_discovery(self, url: str):
+        if not url.startswith(("http://", "https://")):
+            raise ValueError("only public HTTP(S) candidate URLs are allowed")
+        self.search_discovery_urls.append(url)
+        return {
+            "id": "search-job-1",
+            "seedSiteId": None,
+            "triggerType": "discovery",
+            "startUrl": url,
+            "status": "queued",
+            "reused": False,
+        }
 
-def client():
-    app = create_app(repo=FakeRepo(), jobs=FakeJobs(), api_token="secret", health_check=lambda: True)
+
+def client(jobs=None):
+    jobs = jobs or FakeJobs()
+    app = create_app(repo=FakeRepo(), jobs=jobs, api_token="secret", health_check=lambda: True)
     return TestClient(app)
 
 
@@ -131,3 +148,75 @@ def test_manual_seed_run_returns_conflict_when_seed_is_already_active():
     r = client().post("/v1/seeds/busy/run", headers=auth())
     assert r.status_code == 409
     assert "active crawl job" in r.json()["error"]
+
+
+def test_search_discovery_requires_bearer_token():
+    r = client().post(
+        "/v1/search-discovery/jobs",
+        json={"url": "https://example.gov/notices/123"},
+    )
+    assert r.status_code == 401
+
+
+def test_search_discovery_rejects_invalid_scheme():
+    r = client().post(
+        "/v1/search-discovery/jobs",
+        headers=auth(),
+        json={"url": "file:///etc/passwd"},
+    )
+    assert r.status_code == 400
+    assert "HTTP(S)" in r.json()["error"]
+
+
+def test_search_discovery_enqueues_public_candidate():
+    jobs = FakeJobs()
+    r = client(jobs).post(
+        "/v1/search-discovery/jobs",
+        headers=auth(),
+        json={"url": "https://example.gov/notices/123", "query": "156号", "mode": "auto"},
+    )
+    assert r.status_code == 202
+    assert r.json()["job"]["startUrl"] == "https://example.gov/notices/123"
+    assert r.json()["job"]["seedSiteId"] is None
+    assert jobs.search_discovery_urls == ["https://example.gov/notices/123"]
+
+
+def test_search_discovery_accepts_200_character_query():
+    r = client().post(
+        "/v1/search-discovery/jobs",
+        headers=auth(),
+        json={"url": "https://example.gov/notices/123", "query": "a" * 200},
+    )
+    assert r.status_code == 202
+
+
+def test_search_discovery_rejects_query_over_200_characters():
+    r = client().post(
+        "/v1/search-discovery/jobs",
+        headers=auth(),
+        json={"url": "https://example.gov/notices/123", "query": "a" * 201},
+    )
+    assert r.status_code == 400
+
+
+def test_search_discovery_rejects_unknown_mode():
+    r = client().post(
+        "/v1/search-discovery/jobs",
+        headers=auth(),
+        json={"url": "https://example.gov/notices/123", "mode": "deep"},
+    )
+    assert r.status_code == 400
+
+
+def test_search_discovery_does_not_accept_safety_policy_overrides():
+    r = client().post(
+        "/v1/search-discovery/jobs",
+        headers=auth(),
+        json={
+            "url": "https://example.gov/notices/123",
+            "allowedHosts": ["internal.example"],
+            "maxPages": 5000,
+        },
+    )
+    assert r.status_code == 400
+    assert "unsupported" in r.json()["error"]
