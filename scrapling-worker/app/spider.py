@@ -31,8 +31,8 @@ class PdfDiscoverySpider(Spider):
         self.max_pdfs_cfg = max_pdfs
         self.include_patterns_cfg = include_patterns or []
         self.exclude_patterns_cfg = exclude_patterns or []
-        self.concurrent_requests = max(1, max_concurrency)
-        self.concurrent_requests_per_domain = max(1, max_concurrency)
+        self.concurrent_requests = min(6, max(1, max_concurrency))
+        self.concurrent_requests_per_domain = min(2, self.concurrent_requests)
         self.download_delay = max(0.0, 60.0 / max(1, max_requests_per_minute))
         self._page_count = 0
         self._pdf_count = 0
