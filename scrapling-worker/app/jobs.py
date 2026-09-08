@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 
 from .link_policy import candidate_download_hosts
 from .pdf_store import download_pdf, normalize_url, persist_pdf
+from .search_discovery import SearchCandidate, build_search_candidate
 from .spider import PdfDiscoverySpider
 
 
@@ -32,7 +33,7 @@ class JobRunner:
 class QueuedJob:
     job_id: str
     mode: str
-    seed: dict
+    seed: dict | None
     start_url: str
     referrer_url: str | None = None
 
@@ -47,9 +48,6 @@ class CrawlerJobs:
 
     async def start(self):
         if not self.task:
-            # The queue itself is in-memory. Any DB row left as queued/running belongs
-            # to a previous process instance and can no longer make progress, so close
-            # it before this worker starts accepting new work.
             await self.repo.fail_interrupted_jobs()
             self.task = asyncio.create_task(self._worker(), name="scrapling-crawl-worker")
             if getattr(self.settings, "scheduler_enabled", True):
@@ -86,6 +84,16 @@ class CrawlerJobs:
             raise LookupError("url host is not covered by an enabled seed site")
         job = await self.repo.create_crawl_job(seed["id"], "discovery", url)
         await self.queue.put(QueuedJob(job["id"], "ingest", seed, url, referrer_url))
+        return job
+
+    async def enqueue_search_discovery(self, url: str):
+        candidate = build_search_candidate(url)
+        job = await self.repo.claim_search_discovery_job(
+            normalized_url=candidate.normalized_url,
+            start_url=candidate.url,
+        )
+        if not job.get("reused") and job["status"] == "queued":
+            await self.queue.put(QueuedJob(job["id"], "search-discovery", None, candidate.url))
         return job
 
     async def _schedule_due_seeds_once(self) -> int:
@@ -125,10 +133,14 @@ class CrawlerJobs:
     async def _execute(self, item: QueuedJob) -> str:
         if item.mode == "ingest":
             return await self._run_ingest(item)
+        if item.mode == "search-discovery":
+            return await self._run_search_discovery(item)
         return await self._run_seed(item)
 
     async def _run_ingest(self, item: QueuedJob) -> str:
         seed = item.seed
+        if seed is None:
+            raise RuntimeError("ingest job requires a seed policy")
         normalized = normalize_url(item.start_url)
         host = (urlsplit(item.start_url).hostname or "").lower()
         await self.repo.upsert_discovered_link(
@@ -154,10 +166,67 @@ class CrawlerJobs:
             await self.repo.mark_discovered_status(normalized, "failed")
             raise
 
+    async def _run_search_discovery(self, item: QueuedJob) -> str:
+        candidate = build_search_candidate(item.start_url)
+        if candidate.is_direct_pdf_hint:
+            return await self._run_search_direct_pdf(item, candidate)
+        return await self._run_spider_job(
+            item,
+            allowed_hosts=set(candidate.allowed_hosts),
+            max_depth=candidate.max_depth,
+            max_pages=candidate.max_pages,
+            max_pdfs=candidate.max_pdfs,
+            max_concurrency=candidate.max_concurrency,
+            max_requests_per_minute=30,
+            max_dynamic_pages=candidate.max_dynamic_pages,
+            include_patterns=[],
+            exclude_patterns=[],
+            max_pdf_bytes=self.settings.max_pdf_bytes,
+            max_job_seconds=candidate.max_job_seconds,
+        )
+
+    async def _run_search_direct_pdf(self, item: QueuedJob, candidate: SearchCandidate) -> str:
+        await self.repo.upsert_discovered_link(
+            url=candidate.url,
+            normalized_url=candidate.normalized_url,
+            referrer_url=None,
+            source_host=candidate.host,
+            anchor_text=None,
+            likely_document=True,
+            ingestion_status="queued",
+        )
+        try:
+            downloaded = await download_pdf(
+                url=candidate.url,
+                allowed_hosts=set(candidate.allowed_hosts),
+                max_bytes=self.settings.max_pdf_bytes,
+                user_agent=self.settings.user_agent,
+            )
+            result = await persist_pdf(
+                repo=self.repo,
+                downloaded=downloaded,
+                data_dir=self.settings.data_dir,
+                referrer_url=None,
+                anchor_text=None,
+            )
+            await self.repo.mark_discovered_status(candidate.normalized_url, "downloaded")
+            await self.repo.update_crawl_job(
+                item.job_id,
+                files_discovered=1,
+                files_downloaded=1,
+                duplicates_found=1 if result["duplicate"] else 0,
+            )
+            return "succeeded"
+        except Exception:
+            await self.repo.mark_discovered_status(candidate.normalized_url, "failed")
+            raise
+
     async def _run_seed(self, item: QueuedJob) -> str:
         seed = item.seed
-        spider = PdfDiscoverySpider(
-            start_url=item.start_url,
+        if seed is None:
+            raise RuntimeError("seed crawl requires a seed policy")
+        return await self._run_spider_job(
+            item,
             allowed_hosts=set(seed["allowedHosts"]),
             max_depth=seed["maxDepth"],
             max_pages=self.settings.max_pages_per_job,
@@ -167,6 +236,37 @@ class CrawlerJobs:
             max_dynamic_pages=self.settings.max_dynamic_pages,
             include_patterns=seed["includePatterns"],
             exclude_patterns=seed["excludePatterns"],
+            max_pdf_bytes=seed["maxPdfBytes"],
+            max_job_seconds=self.settings.max_job_seconds,
+        )
+
+    async def _run_spider_job(
+        self,
+        item: QueuedJob,
+        *,
+        allowed_hosts: set[str],
+        max_depth: int,
+        max_pages: int,
+        max_pdfs: int,
+        max_concurrency: int,
+        max_requests_per_minute: int,
+        max_dynamic_pages: int,
+        include_patterns: list[str],
+        exclude_patterns: list[str],
+        max_pdf_bytes: int,
+        max_job_seconds: int,
+    ) -> str:
+        spider = PdfDiscoverySpider(
+            start_url=item.start_url,
+            allowed_hosts=allowed_hosts,
+            max_depth=max_depth,
+            max_pages=max_pages,
+            max_pdfs=max_pdfs,
+            max_concurrency=max_concurrency,
+            max_requests_per_minute=max_requests_per_minute,
+            max_dynamic_pages=max_dynamic_pages,
+            include_patterns=include_patterns,
+            exclude_patterns=exclude_patterns,
         )
         pages = discovered = downloaded_count = duplicates = errors = 0
         error_messages: list[str] = []
@@ -217,15 +317,11 @@ class CrawlerJobs:
                 ingestion_status="queued",
             )
             try:
-                # Directly discovered attachments may live on a CDN. Only that exact
-                # candidate host is added for this download; recursive HTML traversal
-                # remains bounded by the seed host/path and the downloader still blocks
-                # private IPs and revalidates redirects.
-                download_hosts = candidate_download_hosts(url, set(seed["allowedHosts"]))
+                download_hosts = candidate_download_hosts(url, allowed_hosts)
                 pdf = await download_pdf(
                     url=url,
                     allowed_hosts=download_hosts,
-                    max_bytes=min(seed["maxPdfBytes"], self.settings.max_pdf_bytes),
+                    max_bytes=min(max_pdf_bytes, self.settings.max_pdf_bytes),
                     user_agent=self.settings.user_agent,
                 )
                 stored = await persist_pdf(
@@ -247,16 +343,13 @@ class CrawlerJobs:
 
         timed_out = False
         try:
-            # Scrapling's stream() API yields each item immediately and exposes live
-            # crawl statistics. This avoids holding the entire crawl in memory and lets
-            # the API report useful progress while a long crawl is still running.
-            async with asyncio.timeout(self.settings.max_job_seconds):
+            async with asyncio.timeout(max_job_seconds):
                 async for crawl_item in spider.stream():
                     await consume(crawl_item)
         except TimeoutError:
             timed_out = True
             errors += 1
-            error_messages.append(f"crawl exceeded {self.settings.max_job_seconds}s runtime limit")
+            error_messages.append(f"crawl exceeded {max_job_seconds}s runtime limit")
             try:
                 spider.pause()
             except RuntimeError:
