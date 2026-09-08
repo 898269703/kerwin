@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 from urllib.parse import urlsplit
@@ -8,6 +9,9 @@ from urllib.parse import urlsplit
 from .link_policy import candidate_download_hosts
 from .pdf_store import download_pdf, normalize_url, persist_pdf
 from .spider import PdfDiscoverySpider
+
+
+logger = logging.getLogger(__name__)
 
 
 class JobRunner:
@@ -39,16 +43,26 @@ class CrawlerJobs:
         self.settings = settings
         self.queue: asyncio.Queue[QueuedJob | None] = asyncio.Queue()
         self.task: asyncio.Task | None = None
+        self.scheduler_task: asyncio.Task | None = None
 
     async def start(self):
         if not self.task:
-            # The queue itself is in-memory. Any DB row left as running belongs to a
-            # previous process instance and can no longer make progress, so close it
-            # before this worker starts accepting new work.
+            # The queue itself is in-memory. Any DB row left as queued/running belongs
+            # to a previous process instance and can no longer make progress, so close
+            # it before this worker starts accepting new work.
             await self.repo.fail_interrupted_jobs()
             self.task = asyncio.create_task(self._worker(), name="scrapling-crawl-worker")
+            if getattr(self.settings, "scheduler_enabled", True):
+                self.scheduler_task = asyncio.create_task(self._scheduler_loop(), name="scrapling-seed-scheduler")
 
     async def stop(self):
+        if self.scheduler_task:
+            self.scheduler_task.cancel()
+            try:
+                await self.scheduler_task
+            except asyncio.CancelledError:
+                pass
+            self.scheduler_task = None
         if self.task:
             await self.queue.put(None)
             await self.task
@@ -59,7 +73,9 @@ class CrawlerJobs:
         if not seed or not seed["enabled"]:
             raise LookupError("enabled seed site not found")
         url = start_url or seed["baseUrl"]
-        job = await self.repo.create_crawl_job(seed["id"], "seed", url)
+        job = await self.repo.create_crawl_job_if_idle(seed["id"], "seed", url)
+        if not job:
+            raise RuntimeError("seed already has an active crawl job")
         await self.queue.put(QueuedJob(job["id"], "seed", seed, url))
         return job
 
@@ -71,6 +87,30 @@ class CrawlerJobs:
         job = await self.repo.create_crawl_job(seed["id"], "discovery", url)
         await self.queue.put(QueuedJob(job["id"], "ingest", seed, url, referrer_url))
         return job
+
+    async def _schedule_due_seeds_once(self) -> int:
+        due = await self.repo.list_due_seed_sites(limit=10)
+        enqueued = 0
+        for seed in due:
+            job = await self.repo.create_crawl_job_if_idle(seed["id"], "seed", seed["baseUrl"])
+            if not job:
+                continue
+            await self.queue.put(QueuedJob(job["id"], "seed", seed, seed["baseUrl"]))
+            enqueued += 1
+        return enqueued
+
+    async def _scheduler_loop(self):
+        poll_seconds = max(30, int(getattr(self.settings, "scheduler_poll_seconds", 60)))
+        while True:
+            try:
+                count = await self._schedule_due_seeds_once()
+                if count:
+                    logger.info("seed scheduler enqueued %s crawl job(s)", count)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("seed scheduler iteration failed")
+            await asyncio.sleep(poll_seconds)
 
     async def _worker(self):
         while True:
