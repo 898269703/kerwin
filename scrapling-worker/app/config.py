@@ -4,6 +4,11 @@ import os
 from dataclasses import dataclass
 
 
+def _bounded_int(name: str, default: int, *, minimum: int, maximum: int) -> int:
+    value = int(os.environ.get(name, str(default)))
+    return max(minimum, min(maximum, value))
+
+
 @dataclass(frozen=True)
 class Settings:
     database_url: str
@@ -12,8 +17,11 @@ class Settings:
     port: int = 3001
     user_agent: str = "PDF-Finder-Scrapling/1.0 (+public-document-crawler)"
     max_pages_per_job: int = 500
-    max_pdfs_per_job: int = 200
+    max_pdfs_per_job: int = 100
     max_pdf_bytes: int = 104_857_600
+    max_dynamic_pages: int = 20
+    global_concurrency: int = 6
+    per_domain_concurrency: int = 2
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -30,6 +38,9 @@ class Settings:
             port=int(os.environ.get("PORT", "3001")),
             user_agent=os.environ.get("USER_AGENT", "PDF-Finder-Scrapling/1.0 (+public-document-crawler)"),
             max_pages_per_job=int(os.environ.get("MAX_PAGES_PER_JOB", "500")),
-            max_pdfs_per_job=int(os.environ.get("MAX_PDFS_PER_JOB", "200")),
+            max_pdfs_per_job=_bounded_int("MAX_PDFS_PER_JOB", 100, minimum=1, maximum=100),
             max_pdf_bytes=int(os.environ.get("MAX_PDF_BYTES", "104857600")),
+            max_dynamic_pages=_bounded_int("MAX_DYNAMIC_PAGES", 20, minimum=0, maximum=20),
+            global_concurrency=_bounded_int("GLOBAL_CONCURRENCY", 6, minimum=1, maximum=6),
+            per_domain_concurrency=_bounded_int("PER_DOMAIN_CONCURRENCY", 2, minimum=1, maximum=2),
         )
