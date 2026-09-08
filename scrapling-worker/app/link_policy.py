@@ -49,6 +49,44 @@ def _host_allowed(host: str, allowed_hosts: set[str]) -> bool:
     )
 
 
+def _seed_scope_path(seed_url: str) -> tuple[str, str]:
+    parsed = urlsplit(seed_url)
+    path = parsed.path or "/"
+    if path == "/":
+        return "root", "/"
+    if path.endswith("/"):
+        return "prefix", path
+    last_segment = path.rsplit("/", 1)[-1]
+    if "." in last_segment:
+        parent = path.rsplit("/", 1)[0] + "/"
+        return "prefix", parent
+    return "subtree", path.rstrip("/")
+
+
+def is_url_within_seed_scope(url: str, seed_url: str) -> bool:
+    """Keep recursive HTML traversal inside the seed's natural URL subtree.
+
+    A root seed (``https://example.com/``) intentionally covers the full host.
+    Directory seeds cover descendants. Extension-looking document/article seeds
+    cover their parent directory, while extensionless paths cover their subtree.
+    Host permission remains a separate check in ``should_follow``.
+    """
+    parsed = urlsplit(url)
+    seed = urlsplit(seed_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or not seed.hostname:
+        return False
+    if parsed.hostname.lower().rstrip(".") != seed.hostname.lower().rstrip("."):
+        return False
+
+    mode, scope = _seed_scope_path(seed_url)
+    path = parsed.path or "/"
+    if mode == "root":
+        return True
+    if mode == "prefix":
+        return path.startswith(scope)
+    return path == scope or path.startswith(scope + "/")
+
+
 def should_follow(
     url: str,
     *,
@@ -57,6 +95,7 @@ def should_follow(
     max_depth: int,
     include_patterns: list[str],
     exclude_patterns: list[str],
+    scope_url: str | None = None,
 ) -> bool:
     if depth > max_depth:
         return False
@@ -64,6 +103,8 @@ def should_follow(
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         return False
     if not _host_allowed(parsed.hostname, allowed_hosts):
+        return False
+    if scope_url and not include_patterns and not is_url_within_seed_scope(url, scope_url):
         return False
     if any(re.search(pattern, url) for pattern in exclude_patterns):
         return False
