@@ -3,7 +3,10 @@ from __future__ import annotations
 import re
 from urllib.parse import urljoin, urlsplit
 
+from scrapling.fetchers import AsyncDynamicSession, FetcherSession
 from scrapling.spiders import Request, Response, Spider
+
+from .dynamic_policy import make_browser_page_setup, needs_dynamic_fallback
 
 
 _LIKELY_PDF_PATH = re.compile(r"(?:\.pdf(?:$|[?#])|/(?:download|attachment|attachments|file|files)(?:/|\?|$))", re.I)
@@ -64,14 +67,32 @@ class PdfDiscoverySpider(Spider):
         self.download_delay = max(0.0, 60.0 / max(1, max_requests_per_minute))
         self._page_count = 0
         self._pdf_count = 0
+        self._browser_page_setup = make_browser_page_setup()
+
+    def configure_sessions(self, manager):
+        manager.add("http", FetcherSession(follow_redirects="safe"), default=True)
+        manager.add(
+            "dynamic",
+            AsyncDynamicSession(headless=True, network_idle=True, timeout=30000, max_pages=1),
+            lazy=True,
+        )
 
     async def start_requests(self):
-        yield Request(self.start_url, callback=self.parse, meta={"depth": 0})
+        yield Request(self.start_url, sid="http", callback=self.parse, meta={"depth": 0})
 
     async def parse(self, response: Response):
+        async for item in self._parse_response(response, allow_dynamic_retry=True):
+            yield item
+
+    async def parse_dynamic(self, response: Response):
+        async for item in self._parse_response(response, allow_dynamic_retry=False):
+            yield item
+
+    async def _parse_response(self, response: Response, *, allow_dynamic_retry: bool):
         depth = int(response.meta.get("depth", 0))
         self._page_count += 1
         title = response.css("title::text").get("")
+        fetch_mode = getattr(getattr(response, "request", None), "sid", "") or "http"
         yield {
             "kind": "page",
             "url": str(response.url),
@@ -79,9 +100,13 @@ class PdfDiscoverySpider(Spider):
             "contentType": response.headers.get("content-type", "") if response.headers else "",
             "depth": depth,
             "pageTitle": title.strip() if title else None,
+            "fetchMode": fetch_mode,
         }
         if self._page_count >= self.max_pages_cfg:
             return
+
+        html_link_count = 0
+        pdf_candidate_count = 0
 
         for anchor in response.css("a[href]"):
             href = anchor.css("::attr(href)").get()
@@ -99,6 +124,7 @@ class PdfDiscoverySpider(Spider):
                 if self._pdf_count >= self.max_pdfs_cfg:
                     continue
                 self._pdf_count += 1
+                pdf_candidate_count += 1
                 yield {
                     "kind": "pdf",
                     "url": absolute,
@@ -117,4 +143,30 @@ class PdfDiscoverySpider(Spider):
                 include_patterns=self.include_patterns_cfg,
                 exclude_patterns=self.exclude_patterns_cfg,
             ):
-                yield response.follow(absolute, callback=self.parse, meta={"depth": next_depth})
+                html_link_count += 1
+                # Construct a fresh HTTP request instead of inheriting browser-only kwargs.
+                yield Request(
+                    absolute,
+                    sid="http",
+                    callback=self.parse,
+                    meta={"depth": next_depth},
+                )
+
+        if allow_dynamic_retry and needs_dynamic_fallback(
+            html=str(response.get()),
+            html_link_count=html_link_count,
+            pdf_candidate_count=pdf_candidate_count,
+        ):
+            # Session ID participates in Scrapling's request fingerprint, so the same URL
+            # can safely be revisited through the browser after the static HTTP request.
+            yield Request(
+                str(response.url),
+                sid="dynamic",
+                callback=self.parse_dynamic,
+                meta={"depth": depth},
+                priority=1,
+                page_setup=self._browser_page_setup,
+                google_search=False,
+                network_idle=True,
+                timeout=30000,
+            )
