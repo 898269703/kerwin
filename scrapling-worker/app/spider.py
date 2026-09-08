@@ -68,13 +68,16 @@ class PdfDiscoverySpider(Spider):
     async def _parse_response(self, response: Response, *, allow_dynamic_retry: bool):
         depth = int(response.meta.get("depth", 0))
         self._page_count += 1
-        title = response.css("title::text").get("")
+        content_type = response.headers.get("content-type", "") if response.headers else ""
+        mime_type = content_type.split(";", 1)[0].strip().lower()
+        is_html = not mime_type or mime_type in {"text/html", "application/xhtml+xml"}
+        title = response.css("title::text").get("") if is_html else ""
         fetch_mode = getattr(getattr(response, "request", None), "sid", "") or "http"
         yield {
             "kind": "page",
             "url": str(response.url),
             "statusCode": int(response.status),
-            "contentType": response.headers.get("content-type", "") if response.headers else "",
+            "contentType": content_type,
             "depth": depth,
             "pageTitle": title.strip() if title else None,
             "fetchMode": fetch_mode,
@@ -87,6 +90,11 @@ class PdfDiscoverySpider(Spider):
                 self.pause()
             except RuntimeError:
                 pass
+            return
+
+        # Binary/text assets are useful crawl records but are not DOM pages. Avoid
+        # CSS parsing and browser fallback for them even if a server returns 200.
+        if not is_html:
             return
 
         # If no explicit include regexes were supplied, a redirect must not silently
