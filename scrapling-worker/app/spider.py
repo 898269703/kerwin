@@ -1,43 +1,12 @@
 from __future__ import annotations
 
-import re
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urljoin
 
 from scrapling.fetchers import AsyncDynamicSession, FetcherSession
 from scrapling.spiders import Request, Response, Spider
 
 from .dynamic_policy import make_browser_page_setup, needs_dynamic_fallback
-
-
-_LIKELY_PDF_PATH = re.compile(r"(?:\.pdf(?:$|[?#])|/(?:download|attachment|attachments|file|files)(?:/|\?|$))", re.I)
-
-
-def classify_link(url: str, anchor_text: str | None = None) -> str:
-    text = (anchor_text or "").lower()
-    if _LIKELY_PDF_PATH.search(url) or ".pdf" in text or "pdf" in text:
-        return "pdf"
-    return "html"
-
-
-def _host_allowed(host: str, allowed_hosts: set[str]) -> bool:
-    host = host.lower().rstrip(".")
-    return any(host == allowed.lower().rstrip(".") or host.endswith("." + allowed.lower().rstrip(".")) for allowed in allowed_hosts)
-
-
-def should_follow(url: str, *, allowed_hosts: set[str], depth: int, max_depth: int,
-                  include_patterns: list[str], exclude_patterns: list[str]) -> bool:
-    if depth > max_depth:
-        return False
-    parsed = urlsplit(url)
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        return False
-    if not _host_allowed(parsed.hostname, allowed_hosts):
-        return False
-    if any(re.search(pattern, url) for pattern in exclude_patterns):
-        return False
-    if include_patterns and not any(re.search(pattern, url) for pattern in include_patterns):
-        return False
-    return classify_link(url) == "html"
+from .link_policy import classify_link, should_accept_pdf_candidate, should_follow
 
 
 class PdfDiscoverySpider(Spider):
@@ -114,13 +83,12 @@ class PdfDiscoverySpider(Spider):
                 continue
             absolute = urljoin(str(response.url), href)
             text = anchor.get_all_text(strip=True) if hasattr(anchor, "get_all_text") else ""
-            parsed = urlsplit(absolute)
-            if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-                continue
-            if not _host_allowed(parsed.hostname, self.allowed_hosts_cfg):
-                continue
 
-            if classify_link(absolute, text) == "pdf":
+            # A directly discovered file candidate is allowed to live on a CDN or
+            # attachment host outside the seed site's recursive HTML allowlist.
+            # The downloader revalidates its exact candidate host, redirects,
+            # DNS/IP safety, size and PDF bytes before persistence.
+            if should_accept_pdf_candidate(absolute, text):
                 if self._pdf_count >= self.max_pdfs_cfg:
                     continue
                 self._pdf_count += 1
