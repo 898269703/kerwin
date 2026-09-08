@@ -22,6 +22,21 @@ class FakeDb:
                 "score": 1.0,
                 "source_count": 2,
             }]
+        if "FROM seed_sites s" in sql:
+            return [{
+                "id": "seed-due",
+                "name": "Due seed",
+                "base_url": "https://example.com/docs/",
+                "allowed_hosts": ["example.com"],
+                "include_patterns": [],
+                "exclude_patterns": [],
+                "max_depth": 2,
+                "max_requests_per_minute": 30,
+                "max_concurrency": 1,
+                "max_pdf_bytes": 10_485_760,
+                "crawl_interval_minutes": 60,
+                "enabled": True,
+            }]
         return []
 
     async def fetch_one(self, sql, params=()):
@@ -32,6 +47,29 @@ class FakeDb:
                 "preferred_title": "156.pdf",
                 "preferred_filename": "156.pdf",
                 "content": b"%PDF-blob",
+            }
+        if "INSERT INTO crawl_jobs" in sql and "NOT EXISTS" in sql:
+            return {
+                "id": "job-1",
+                "seed_site_id": "seed-due",
+                "trigger_type": "seed",
+                "start_url": "https://example.com/docs/",
+                "status": "queued",
+            }
+        if "UPDATE seed_sites" in sql and "RETURNING" in sql:
+            return {
+                "id": "seed-due",
+                "name": "Due seed",
+                "base_url": "https://example.com/docs/",
+                "allowed_hosts": ["example.com"],
+                "include_patterns": [],
+                "exclude_patterns": [],
+                "max_depth": 2,
+                "max_requests_per_minute": 30,
+                "max_concurrency": 1,
+                "max_pdf_bytes": 10_485_760,
+                "crawl_interval_minutes": 120,
+                "enabled": False,
             }
         return None
 
@@ -53,6 +91,7 @@ class SeedDedupeDb(FakeDb):
             "max_requests_per_minute": 30,
             "max_concurrency": 1,
             "max_pdf_bytes": 10_485_760,
+            "crawl_interval_minutes": 0,
             "enabled": True,
         }
 
@@ -123,7 +162,53 @@ async def test_create_seed_reuses_existing_base_url_ignoring_trailing_slash():
         "maxRequestsPerMinute": 30,
         "maxConcurrency": 1,
         "maxPdfBytes": 10_485_760,
+        "crawlIntervalMinutes": 60,
     })
 
     assert seed["id"] == "seed-1"
+    assert seed["crawlIntervalMinutes"] == 0
     assert not any(call[0] == "fetch_one" and "INSERT INTO seed_sites" in call[1] for call in db.calls)
+
+
+@pytest.mark.asyncio
+async def test_due_seed_query_excludes_active_jobs_and_honors_interval():
+    db = FakeDb()
+    repo = Repository(db)
+
+    seeds = await repo.list_due_seed_sites(limit=10)
+
+    assert seeds[0]["id"] == "seed-due"
+    assert seeds[0]["crawlIntervalMinutes"] == 60
+    _, sql, params = next(call for call in db.calls if call[0] == "fetch_all" and "FROM seed_sites s" in call[1])
+    compact = " ".join(sql.split()).lower()
+    assert "crawl_interval_minutes > 0" in compact
+    assert "status in ('queued','running')" in compact
+    assert "make_interval" in compact
+    assert params == (10,)
+
+
+@pytest.mark.asyncio
+async def test_idle_seed_job_creation_is_atomic():
+    db = FakeDb()
+    repo = Repository(db)
+
+    job = await repo.create_crawl_job_if_idle("seed-due", "seed", "https://example.com/docs/")
+
+    assert job["id"] == "job-1"
+    _, sql, _ = next(call for call in db.calls if call[0] == "fetch_one" and "INSERT INTO crawl_jobs" in call[1])
+    assert "NOT EXISTS" in sql
+    assert "status IN ('queued','running')" in sql
+
+
+@pytest.mark.asyncio
+async def test_seed_policy_can_be_updated_without_deleting_history():
+    db = FakeDb()
+    repo = Repository(db)
+
+    seed = await repo.update_seed_site("seed-due", enabled=False, crawl_interval_minutes=120)
+
+    assert seed["enabled"] is False
+    assert seed["crawlIntervalMinutes"] == 120
+    _, sql, _ = next(call for call in db.calls if call[0] == "fetch_one" and "UPDATE seed_sites" in call[1])
+    assert "DELETE" not in sql.upper()
+    assert "updated_at=now()" in sql
