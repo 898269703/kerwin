@@ -10,6 +10,7 @@ from .link_policy import candidate_download_hosts
 from .pdf_store import download_pdf, normalize_url, persist_pdf
 from .search_discovery import SearchCandidate, build_search_candidate
 from .spider import PdfDiscoverySpider
+from .url_policy import resolve_public_url
 
 
 logger = logging.getLogger(__name__)
@@ -88,6 +89,7 @@ class CrawlerJobs:
 
     async def enqueue_search_discovery(self, url: str):
         candidate = build_search_candidate(url)
+        await resolve_public_url(candidate.url, set(candidate.allowed_hosts))
         job = await self.repo.claim_search_discovery_job(
             normalized_url=candidate.normalized_url,
             start_url=candidate.url,
