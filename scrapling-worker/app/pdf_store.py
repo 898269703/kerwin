@@ -69,13 +69,10 @@ async def download_pdf(*, url: str, allowed_hosts: set[str], max_bytes: int, use
                     raise ValueError("PDF exceeds maximum size")
                 chunks: list[bytes] = []
                 total = 0
-                prefix = bytearray()
                 async for chunk in response.aiter_bytes():
                     total += len(chunk)
                     if total > max_bytes:
                         raise ValueError("PDF exceeds maximum size")
-                    if len(prefix) < 5:
-                        prefix.extend(chunk[: 5 - len(prefix)])
                     chunks.append(chunk)
                 content = b"".join(chunks)
                 verify_pdf_bytes(content)
@@ -96,7 +93,8 @@ async def persist_pdf(*, repo, downloaded: DownloadedPdf, data_dir: str, referre
     key = storage_key_for_hash(downloaded.sha256)
     absolute = Path(data_dir) / key
     absolute.parent.mkdir(parents=True, exist_ok=True)
-    if not absolute.exists():
+    file_existed = absolute.exists()
+    if not file_existed:
         temp = absolute.with_suffix(".part")
         temp.write_bytes(downloaded.content)
         os.replace(temp, absolute)
@@ -123,4 +121,4 @@ async def persist_pdf(*, repo, downloaded: DownloadedPdf, data_dir: str, referre
         http_filename=downloaded.http_filename,
         last_http_status=downloaded.status_code,
     )
-    return {"document": document, "duplicate": bool(upserted["duplicate"] or absolute.exists()), "storageKey": key}
+    return {"document": document, "duplicate": bool(upserted["duplicate"] or file_existed), "storageKey": key}
