@@ -146,6 +146,32 @@ def create_app(*, repo, jobs, api_token: str, health_check) -> FastAPI:
             return _json(409, {"error": str(exc)})
         return _json(202, {"job": job})
 
+    @app.post("/v1/search-discovery/jobs")
+    async def create_search_discovery_job(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict):
+            return _json(400, {"error": "JSON object required"})
+
+        known = {"url", "query", "mode"}
+        unknown = sorted(set(body) - known)
+        if unknown:
+            return _json(400, {"error": f"unsupported search discovery settings: {', '.join(unknown)}"})
+
+        source_url = body.get("url")
+        query = body.get("query", "")
+        mode = body.get("mode", "auto")
+        if not isinstance(source_url, str) or not source_url.strip():
+            return _json(400, {"error": "url is required"})
+        if not isinstance(query, str) or len(query) > 200:
+            return _json(400, {"error": "query must be <= 200 characters"})
+        if mode != "auto":
+            return _json(400, {"error": "mode must be auto"})
+        try:
+            job = await jobs.enqueue_search_discovery(source_url.strip())
+        except ValueError as exc:
+            return _json(400, {"error": str(exc)})
+        return _json(202, {"job": job})
+
     @app.post("/v1/ingest")
     async def ingest(request: Request):
         body = await request.json()
