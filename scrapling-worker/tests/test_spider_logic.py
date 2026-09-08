@@ -46,7 +46,7 @@ def test_html_links_are_followed_within_depth():
 
 
 def test_non_html_assets_are_not_recursively_followed():
-    for suffix in (".dtd", ".ent", ".cat", ".txt", ".zip", ".tgz", ".ps", ".css", ".js", ".xml"):
+    for suffix in (".dtd", ".ent", ".cat", ".decl", ".txt", ".zip", ".tgz", ".ps", ".css", ".js", ".xml"):
         assert not should_follow(
             f"https://www.w3.org/TR/REC-html40-971218/resource{suffix}",
             allowed_hosts={"www.w3.org"},
@@ -162,6 +162,20 @@ class _NonHtmlResponse:
         return "<!ELEMENT HTML O O (%html.content;) +(INS|DEL)>"
 
 
+class _MislabelledDeclarationResponse:
+    url = "https://example.com/spec/HTML4.decl"
+    meta = {"depth": 1}
+    status = 200
+    headers = {"content-type": "text/html"}
+    request = SimpleNamespace(sid="http")
+
+    def css(self, selector):
+        raise AssertionError("known non-html asset URL must override a misleading MIME type")
+
+    def get(self):
+        return "<!SGML O O>"
+
+
 @pytest.mark.asyncio
 async def test_non_html_response_is_recorded_without_css_parsing():
     spider = PdfDiscoverySpider(
@@ -187,6 +201,26 @@ async def test_non_html_response_is_recorded_without_css_parsing():
         "pageTitle": None,
         "fetchMode": "http",
     }]
+
+
+@pytest.mark.asyncio
+async def test_known_non_html_url_wins_over_misleading_html_mime():
+    spider = PdfDiscoverySpider(
+        start_url="https://example.com/spec/",
+        allowed_hosts={"example.com"},
+        max_depth=2,
+        max_pages=20,
+        max_pdfs=10,
+        max_concurrency=2,
+        max_requests_per_minute=60,
+        include_patterns=[],
+        exclude_patterns=[],
+    )
+
+    items = [item async for item in spider._parse_response(_MislabelledDeclarationResponse(), allow_dynamic_retry=True)]
+
+    assert items[0]["pageTitle"] is None
+    assert items[0]["contentType"] == "text/html"
 
 
 @pytest.mark.asyncio
