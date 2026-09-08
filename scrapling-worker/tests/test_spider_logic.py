@@ -148,6 +148,47 @@ class _JsShellResponse:
         return "<html><body><div id='app'></div><script></script></body></html>"
 
 
+class _NonHtmlResponse:
+    url = "https://example.com/spec/strict.dtd"
+    meta = {"depth": 1}
+    status = 200
+    headers = {"content-type": "application/xml-dtd"}
+    request = SimpleNamespace(sid="http")
+
+    def css(self, selector):
+        raise AssertionError("non-html response must not be parsed with CSS selectors")
+
+    def get(self):
+        return "<!ELEMENT HTML O O (%html.content;) +(INS|DEL)>"
+
+
+@pytest.mark.asyncio
+async def test_non_html_response_is_recorded_without_css_parsing():
+    spider = PdfDiscoverySpider(
+        start_url="https://example.com/spec/",
+        allowed_hosts={"example.com"},
+        max_depth=2,
+        max_pages=20,
+        max_pdfs=10,
+        max_concurrency=2,
+        max_requests_per_minute=60,
+        include_patterns=[],
+        exclude_patterns=[],
+    )
+
+    items = [item async for item in spider._parse_response(_NonHtmlResponse(), allow_dynamic_retry=True)]
+
+    assert items == [{
+        "kind": "page",
+        "url": "https://example.com/spec/strict.dtd",
+        "statusCode": 200,
+        "contentType": "application/xml-dtd",
+        "depth": 1,
+        "pageTitle": None,
+        "fetchMode": "http",
+    }]
+
+
 @pytest.mark.asyncio
 async def test_dynamic_fallback_has_a_hard_total_page_cap():
     spider = PdfDiscoverySpider(
