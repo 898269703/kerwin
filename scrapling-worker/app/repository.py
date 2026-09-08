@@ -179,10 +179,6 @@ class Repository:
         return self._seed(row)
 
     async def create_seed_site(self, data: dict[str, Any]):
-        # Seed counts are small, and preserving the first row is safer than applying a
-        # destructive unique migration while historical duplicates may already exist.
-        # Treat a sole trailing slash as equivalent so repeated setup/smoke calls are
-        # idempotent without changing case-sensitive URL path semantics.
         existing = await self.db.fetch_one(
             """
             SELECT * FROM seed_sites
@@ -271,8 +267,8 @@ class Repository:
         )
         return self._job(row)
 
-    async def claim_search_discovery_job(self, *, normalized_url: str, start_url: str):
-        active = await self.db.fetch_one(
+    async def _claim_search_discovery_job(self, db, *, normalized_url: str, start_url: str):
+        active = await db.fetch_one(
             """
             SELECT * FROM crawl_jobs
             WHERE normalized_start_url=%s
@@ -287,7 +283,7 @@ class Repository:
             job["reused"] = True
             return job
 
-        recent_ok = await self.db.fetch_one(
+        recent_ok = await db.fetch_one(
             """
             SELECT * FROM crawl_jobs
             WHERE normalized_start_url=%s
@@ -303,7 +299,7 @@ class Repository:
             job["reused"] = True
             return job
 
-        recent_failed = await self.db.fetch_one(
+        recent_failed = await db.fetch_one(
             """
             SELECT * FROM crawl_jobs
             WHERE normalized_start_url=%s
@@ -319,7 +315,7 @@ class Repository:
             job["reused"] = True
             return job
 
-        row = await self.db.fetch_one(
+        row = await db.fetch_one(
             """
             INSERT INTO crawl_jobs
               (seed_site_id, trigger_type, start_url, normalized_start_url, status)
@@ -331,6 +327,26 @@ class Repository:
         job = self._job(row)
         job["reused"] = False
         return job
+
+    async def claim_search_discovery_job(self, *, normalized_url: str, start_url: str):
+        transaction = getattr(self.db, "transaction", None)
+        if transaction is None:
+            return await self._claim_search_discovery_job(
+                self.db,
+                normalized_url=normalized_url,
+                start_url=start_url,
+            )
+
+        async with transaction() as tx:
+            await tx.fetch_one(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0)) AS locked",
+                (normalized_url,),
+            )
+            return await self._claim_search_discovery_job(
+                tx,
+                normalized_url=normalized_url,
+                start_url=start_url,
+            )
 
     async def get_crawl_job(self, job_id: str):
         return self._job(await self.db.fetch_one("SELECT * FROM crawl_jobs WHERE id=%s LIMIT 1", (job_id,)))
