@@ -59,8 +59,13 @@ def settings():
     )
 
 
+async def allow_public_url(url, allowed_hosts):
+    return SimpleNamespace(url=url, allowed_hosts=allowed_hosts)
+
+
 @pytest.mark.asyncio
-async def test_enqueue_search_discovery_claims_and_queues_new_job():
+async def test_enqueue_search_discovery_claims_and_queues_new_job(monkeypatch):
+    monkeypatch.setattr(jobs_module, "resolve_public_url", allow_public_url)
     repo = SearchRepo(reused=False)
     crawler = CrawlerJobs(repo, settings())
 
@@ -75,7 +80,8 @@ async def test_enqueue_search_discovery_claims_and_queues_new_job():
 
 
 @pytest.mark.asyncio
-async def test_enqueue_search_discovery_does_not_requeue_reused_job():
+async def test_enqueue_search_discovery_does_not_requeue_reused_job(monkeypatch):
+    monkeypatch.setattr(jobs_module, "resolve_public_url", allow_public_url)
     repo = SearchRepo(reused=True, status="running")
     crawler = CrawlerJobs(repo, settings())
 
