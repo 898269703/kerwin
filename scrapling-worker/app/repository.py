@@ -272,6 +272,8 @@ class Repository:
             """
             SELECT * FROM crawl_jobs
             WHERE normalized_start_url=%s
+              AND seed_site_id IS NULL
+              AND trigger_type='discovery'
               AND status IN ('queued','running')
             ORDER BY created_at DESC
             LIMIT 1
@@ -287,6 +289,8 @@ class Repository:
             """
             SELECT * FROM crawl_jobs
             WHERE normalized_start_url=%s
+              AND seed_site_id IS NULL
+              AND trigger_type='discovery'
               AND status IN ('succeeded','partial')
               AND created_at >= now() - interval '30 minutes'
             ORDER BY created_at DESC
@@ -303,6 +307,8 @@ class Repository:
             """
             SELECT * FROM crawl_jobs
             WHERE normalized_start_url=%s
+              AND seed_site_id IS NULL
+              AND trigger_type='discovery'
               AND status='failed'
               AND created_at >= now() - interval '5 minutes'
             ORDER BY created_at DESC
