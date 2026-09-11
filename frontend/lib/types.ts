@@ -16,8 +16,30 @@ export interface SearchResult {
   libraryId?: string;
 }
 
+export type CrawlJobStatus = 'queued' | 'running' | 'succeeded' | 'partial' | 'failed';
+export type CrawlState = 'not_needed' | 'started' | 'running' | 'complete' | 'unavailable';
+
+export interface CrawlJob {
+  id: string;
+  startUrl: string;
+  status: CrawlJobStatus;
+  pagesFetched: number;
+  filesDiscovered: number;
+  filesDownloaded: number;
+  duplicatesFound: number;
+  errorsCount: number;
+  errorSummary?: string | null;
+  reused?: boolean;
+}
+
+export interface CrawlInfo {
+  state: CrawlState;
+  jobs: CrawlJob[];
+}
+
 export interface SearchResponse {
   query: string;
   results: SearchResult[];
   warnings?: string[];
+  crawl?: CrawlInfo;
 }
