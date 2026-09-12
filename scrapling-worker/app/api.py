@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import inspect
 import re
 from urllib.parse import urlsplit
@@ -45,12 +46,23 @@ def _string_list(value, *, limit: int = 100) -> list[str] | None:
     return [v for v in value if v]
 
 
-def create_app(*, repo, jobs, api_token: str, health_check) -> FastAPI:
+def _authorized_bearer(header: str, api_token: str, preview_token: str | None) -> bool:
+    prefix = "Bearer "
+    if not header.startswith(prefix):
+        return False
+    supplied = header[len(prefix):]
+    accepted = (api_token, (preview_token or "").strip())
+    return any(value and hmac.compare_digest(supplied, value) for value in accepted)
+
+
+def create_app(*, repo, jobs, api_token: str, health_check, preview_token: str | None = None) -> FastAPI:
     app = FastAPI(title="PDF Finder Scrapling Worker", docs_url=None, redoc_url=None)
 
     @app.middleware("http")
     async def protect_v1(request: Request, call_next):
-        if request.url.path.startswith("/v1/") and request.headers.get("authorization", "") != f"Bearer {api_token}":
+        if request.url.path.startswith("/v1/") and not _authorized_bearer(
+            request.headers.get("authorization", ""), api_token, preview_token
+        ):
             return _json(401, {"error": "unauthorized"})
         return await call_next(request)
 
