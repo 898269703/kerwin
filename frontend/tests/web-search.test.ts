@@ -16,6 +16,7 @@ const genericPage = {
 afterEach(() => {
   vi.unstubAllGlobals();
   delete process.env.SEARXNG_BASE_URL;
+  delete process.env.SEARCH_BASE_URL;
 });
 
 test('official direct PDF ranks above a generic page with similar query text', () => {
@@ -38,4 +39,16 @@ test('normalizes SearXNG JSON into UI results', async () => {
   expect(results[0].origin).toBe('web');
   expect(results[0].sourceClass).toBe('official');
   expect(results[0].reasons.length).toBeGreaterThan(0);
+});
+
+test('uses the production SearXNG service when no override is configured', async () => {
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ results: [genericPage] }), { status: 200 }));
+  vi.stubGlobal('fetch', fetchMock);
+
+  await searchWeb('预算定额');
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    expect.stringMatching(/^https:\/\/searxng-production-00a4\.up\.railway\.app\/search\?/),
+    expect.objectContaining({ cache: 'no-store' }),
+  );
 });
