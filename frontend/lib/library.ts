@@ -15,14 +15,15 @@ type LibraryPayload = {
   results?: LibraryRow[];
 };
 
-function crawlerPublicBase(): string | null {
-  const raw = process.env.CRAWLER_PUBLIC_BASE_URL ?? process.env.CRAWLER_BASE_URL;
-  return raw?.trim().replace(/\/$/, '') || null;
+const DEFAULT_CRAWLER_PUBLIC_BASE_URL = 'https://crawler-worker-production.up.railway.app';
+
+function crawlerPublicBase(): string {
+  const raw = process.env.CRAWLER_PUBLIC_BASE_URL ?? process.env.CRAWLER_BASE_URL ?? DEFAULT_CRAWLER_PUBLIC_BASE_URL;
+  return raw.trim().replace(/\/$/, '');
 }
 
 export async function searchLibrary(query: string): Promise<SearchResult[]> {
   const base = crawlerPublicBase();
-  if (!base) return [];
 
   const response = await fetch(
     `${base}/public/search?q=${encodeURIComponent(query)}&limit=20`,
