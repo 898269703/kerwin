@@ -44,10 +44,13 @@ test('maps public library results into verified local download results', async (
   expect(rows[0].reasons).toContain('本站已收录');
 });
 
-test('returns empty results when crawler library base is not configured', async () => {
-  const fetchMock = vi.fn();
+test('uses the production public worker base when no override is configured', async () => {
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ query: '预算定额', results: [] }), { status: 200 }));
   vi.stubGlobal('fetch', fetchMock);
 
   await expect(searchLibrary('预算定额')).resolves.toEqual([]);
-  expect(fetchMock).not.toHaveBeenCalled();
+  expect(fetchMock).toHaveBeenCalledWith(
+    'https://crawler-worker-production.up.railway.app/public/search?q=%E9%A2%84%E7%AE%97%E5%AE%9A%E9%A2%9D&limit=20',
+    expect.objectContaining({ cache: 'no-store' }),
+  );
 });
