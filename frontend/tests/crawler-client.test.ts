@@ -17,11 +17,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
   delete process.env.CRAWLER_BASE_URL;
   delete process.env.CRAWLER_API_TOKEN;
+  delete process.env.VERCEL_OIDC_TOKEN;
 });
 
 test('adds bearer token only to the server-side search-discovery request', async () => {
   process.env.CRAWLER_BASE_URL = 'https://crawler.example';
   process.env.CRAWLER_API_TOKEN = 'server-secret';
+  process.env.VERCEL_OIDC_TOKEN = 'oidc-fallback';
   const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ job: fakeJob }), { status: 202 }));
   vi.stubGlobal('fetch', fetchMock);
 
@@ -34,6 +36,21 @@ test('adds bearer token only to the server-side search-discovery request', async
       method: 'POST',
       headers: expect.objectContaining({ authorization: 'Bearer server-secret' }),
       body: JSON.stringify({ url: 'https://example.gov/a', query: '156号', mode: 'auto' }),
+    }),
+  );
+});
+
+test('falls back to Vercel OIDC and the public worker base in preview', async () => {
+  process.env.VERCEL_OIDC_TOKEN = 'vercel-oidc';
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ job: fakeJob }), { status: 202 }));
+  vi.stubGlobal('fetch', fetchMock);
+
+  await enqueueSearchDiscovery('https://example.gov/a', '156号');
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    'https://crawler-worker-production.up.railway.app/v1/search-discovery/jobs',
+    expect.objectContaining({
+      headers: expect.objectContaining({ authorization: 'Bearer vercel-oidc' }),
     }),
   );
 });
