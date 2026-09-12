@@ -10,6 +10,8 @@ type SearxPayload = {
   results?: WebCandidate[];
 };
 
+const DEFAULT_SEARXNG_BASE_URL = 'https://searxng-production-00a4.up.railway.app';
+
 const OFFICIAL_HOSTS = [
   'sgcc.com.cn',
   'csg.cn',
@@ -111,9 +113,8 @@ export function rankWebCandidates(query: string, candidates: WebCandidate[]): Se
 }
 
 export async function searchWeb(query: string): Promise<SearchResult[]> {
-  const raw = process.env.SEARXNG_BASE_URL ?? process.env.SEARCH_BASE_URL;
-  const base = raw?.trim().replace(/\/$/, '');
-  if (!base) return [];
+  const raw = process.env.SEARXNG_BASE_URL ?? process.env.SEARCH_BASE_URL ?? DEFAULT_SEARXNG_BASE_URL;
+  const base = raw.trim().replace(/\/$/, '');
 
   const params = new URLSearchParams({ q: query, format: 'json', categories: 'general' });
   const response = await fetch(`${base}/search?${params.toString()}`, {
