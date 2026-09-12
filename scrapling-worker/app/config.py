@@ -20,6 +20,7 @@ def _bool_env(name: str, default: bool) -> bool:
 class Settings:
     database_url: str
     api_token: str
+    preview_token: str = ""
     data_dir: str = "/data"
     port: int = 3001
     user_agent: str = "PDF-Finder-Scrapling/1.0 (+public-document-crawler)"
@@ -37,6 +38,7 @@ class Settings:
     def from_env(cls) -> "Settings":
         database_url = os.environ.get("DATABASE_URL", "").strip()
         api_token = os.environ.get("CRAWLER_API_TOKEN", "").strip()
+        preview_token = os.environ.get("CRAWLER_PREVIEW_TOKEN", "").strip()
         if not database_url:
             raise RuntimeError("DATABASE_URL is required")
         if not api_token:
@@ -44,6 +46,7 @@ class Settings:
         return cls(
             database_url=database_url,
             api_token=api_token,
+            preview_token=preview_token,
             data_dir=os.environ.get("DATA_DIR", "/data"),
             port=int(os.environ.get("PORT", "3001")),
             user_agent=os.environ.get("USER_AGENT", "PDF-Finder-Scrapling/1.0 (+public-document-crawler)"),
