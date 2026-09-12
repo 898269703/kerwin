@@ -1,6 +1,4 @@
-import { searchLibrary } from '../../../lib/library';
-import { mergeAndRankInitialResults } from '../../../lib/ranking';
-import { searchWeb } from '../../../lib/web-search';
+import { runSearch } from '../../../lib/search-orchestrator';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,27 +17,8 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: 'query is required and must be <= 200 characters' }, { status: 400 });
   }
 
-  const [librarySettled, webSettled] = await Promise.allSettled([
-    searchLibrary(query),
-    searchWeb(query),
-  ]);
-
-  const warnings: string[] = [];
-  const libraryResults = librarySettled.status === 'fulfilled' ? librarySettled.value : [];
-  const webResults = webSettled.status === 'fulfilled' ? webSettled.value : [];
-
-  if (librarySettled.status === 'rejected') {
-    warnings.push('本站文件库暂时不可用，已保留互联网搜索结果。');
-  }
-  if (webSettled.status === 'rejected') {
-    warnings.push('互联网搜索暂时不可用，已保留本站文件库结果。');
-  }
-
-  return Response.json({
-    query,
-    results: mergeAndRankInitialResults(libraryResults, webResults),
-    ...(warnings.length ? { warnings } : {}),
-  }, {
+  const response = await runSearch(query);
+  return Response.json(response, {
     status: 200,
     headers: { 'cache-control': 'no-store' },
   });
