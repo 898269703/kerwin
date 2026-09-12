@@ -55,13 +55,41 @@ def _authorized_bearer(header: str, api_token: str, preview_token: str | None) -
     return any(value and hmac.compare_digest(supplied, value) for value in accepted)
 
 
-def create_app(*, repo, jobs, api_token: str, health_check, preview_token: str | None = None) -> FastAPI:
+async def _authorized_request(
+    header: str,
+    api_token: str,
+    preview_token: str | None,
+    oidc_verifier,
+) -> bool:
+    if _authorized_bearer(header, api_token, preview_token):
+        return True
+    prefix = "Bearer "
+    if not header.startswith(prefix) or oidc_verifier is None:
+        return False
+    supplied = header[len(prefix):]
+    if not supplied:
+        return False
+    try:
+        return await _bool_result(lambda: oidc_verifier(supplied))
+    except Exception:
+        return False
+
+
+def create_app(
+    *,
+    repo,
+    jobs,
+    api_token: str,
+    health_check,
+    preview_token: str | None = None,
+    oidc_verifier=None,
+) -> FastAPI:
     app = FastAPI(title="PDF Finder Scrapling Worker", docs_url=None, redoc_url=None)
 
     @app.middleware("http")
     async def protect_v1(request: Request, call_next):
-        if request.url.path.startswith("/v1/") and not _authorized_bearer(
-            request.headers.get("authorization", ""), api_token, preview_token
+        if request.url.path.startswith("/v1/") and not await _authorized_request(
+            request.headers.get("authorization", ""), api_token, preview_token, oidc_verifier
         ):
             return _json(401, {"error": "unauthorized"})
         return await call_next(request)
