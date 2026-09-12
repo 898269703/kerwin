@@ -1,9 +1,11 @@
 import type { CrawlJob } from './types';
 
+const DEFAULT_CRAWLER_BASE_URL = 'https://crawler-worker-production.up.railway.app';
+
 function crawlerConfig(): { base: string; token: string } {
-  const base = process.env.CRAWLER_BASE_URL?.trim().replace(/\/$/, '');
-  const token = process.env.CRAWLER_API_TOKEN?.trim();
-  if (!base || !token) throw new Error('crawler service unavailable');
+  const base = (process.env.CRAWLER_BASE_URL?.trim() || DEFAULT_CRAWLER_BASE_URL).replace(/\/$/, '');
+  const token = process.env.CRAWLER_API_TOKEN?.trim() || process.env.VERCEL_OIDC_TOKEN?.trim();
+  if (!token) throw new Error('crawler service unavailable');
   return { base, token };
 }
 
