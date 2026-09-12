@@ -47,7 +47,6 @@ export function mergePostCrawlResults(
 
   for (const result of existing) {
     if (promoted.some((item) => sameDocument(item, result))) continue;
-    if (promoted.some((item) => sameDocument(item, result))) continue;
     promoted.push(result);
   }
 
