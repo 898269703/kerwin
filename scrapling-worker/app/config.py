@@ -16,11 +16,20 @@ def _bool_env(name: str, default: bool) -> bool:
     return raw.strip().lower() not in {"0", "false", "no", "off"}
 
 
+def _csv_env(name: str, default: str) -> tuple[str, ...]:
+    raw = os.environ.get(name, default)
+    return tuple(part.strip() for part in raw.split(",") if part.strip())
+
+
 @dataclass(frozen=True)
 class Settings:
     database_url: str
     api_token: str
     preview_token: str = ""
+    vercel_oidc_team_slug: str = ""
+    vercel_oidc_team_id: str = ""
+    vercel_oidc_project_id: str = ""
+    vercel_oidc_environments: tuple[str, ...] = ("preview", "production")
     data_dir: str = "/data"
     port: int = 3001
     user_agent: str = "PDF-Finder-Scrapling/1.0 (+public-document-crawler)"
@@ -33,6 +42,15 @@ class Settings:
     per_domain_concurrency: int = 2
     scheduler_enabled: bool = True
     scheduler_poll_seconds: int = 60
+
+    @property
+    def vercel_oidc_enabled(self) -> bool:
+        return bool(
+            self.vercel_oidc_team_slug
+            and self.vercel_oidc_team_id
+            and self.vercel_oidc_project_id
+            and self.vercel_oidc_environments
+        )
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -47,6 +65,10 @@ class Settings:
             database_url=database_url,
             api_token=api_token,
             preview_token=preview_token,
+            vercel_oidc_team_slug=os.environ.get("VERCEL_OIDC_TEAM_SLUG", "").strip(),
+            vercel_oidc_team_id=os.environ.get("VERCEL_OIDC_TEAM_ID", "").strip(),
+            vercel_oidc_project_id=os.environ.get("VERCEL_OIDC_PROJECT_ID", "").strip(),
+            vercel_oidc_environments=_csv_env("VERCEL_OIDC_ENVIRONMENTS", "preview,production"),
             data_dir=os.environ.get("DATA_DIR", "/data"),
             port=int(os.environ.get("PORT", "3001")),
             user_agent=os.environ.get("USER_AGENT", "PDF-Finder-Scrapling/1.0 (+public-document-crawler)"),
