@@ -29,6 +29,11 @@ h1 { margin: 0; font-size: clamp(34px, 7vw, 62px); line-height: 1.06; letter-spa
 .examples button { border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,.8); padding: 8px 12px; color: #536074; font-size: 12px; cursor: pointer; }
 .results { padding-top: 34px; padding-bottom: 64px; }
 .summary { margin-bottom: 16px; font-size: 13px; color: var(--muted); }
+.crawl-status { margin-bottom: 14px; padding: 14px 16px; border: 1px solid #dbe5ff; border-radius: 14px; background: #f4f7ff; color: #3450a3; font-size: 13px; font-weight: 650; line-height: 1.55; }
+.crawl-status.running::before, .crawl-status.queued::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 9px; border-radius: 999px; background: currentColor; vertical-align: 1px; opacity: .75; }
+.crawl-status.hit { border-color: #d9eddf; background: #f0f9f3; color: #29723e; }
+.crawl-status.no-hit { border-color: var(--line); background: var(--soft); color: var(--muted); }
+.crawl-status.unavailable { border-color: #f0dfb9; background: #fff9ed; color: #806020; }
 .card { padding: 24px; margin-bottom: 14px; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); box-shadow: 0 5px 20px rgba(31, 42, 67, .035); }
 .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .topmark { color: var(--blue); font-size: 12px; font-weight: 700; }
