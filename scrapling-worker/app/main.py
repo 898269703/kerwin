@@ -8,12 +8,24 @@ from .config import Settings
 from .database import Database, migration_paths
 from .jobs import CrawlerJobs
 from .repository import Repository
+from .vercel_oidc import VercelOidcConfig, VercelOidcVerifier
 
 
 settings = Settings.from_env()
 db = Database(settings.database_url)
 repo = Repository(db)
 jobs = CrawlerJobs(repo, settings)
+
+
+def build_oidc_verifier():
+    if not settings.vercel_oidc_enabled:
+        return None
+    return VercelOidcVerifier(VercelOidcConfig(
+        team_slug=settings.vercel_oidc_team_slug,
+        team_id=settings.vercel_oidc_team_id,
+        project_id=settings.vercel_oidc_project_id,
+        allowed_environments=settings.vercel_oidc_environments,
+    ))
 
 
 async def health_check() -> bool:
@@ -25,6 +37,7 @@ app = create_app(
     jobs=jobs,
     api_token=settings.api_token,
     preview_token=settings.preview_token,
+    oidc_verifier=build_oidc_verifier(),
     health_check=health_check,
 )
 
