@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app.api import create_app
+from app.config import Settings
 
 
 class Repo:
@@ -45,3 +46,13 @@ def test_unknown_credential_is_rejected():
 def test_missing_preview_credential_does_not_weaken_authentication():
     response = build_client("").get("/v1/seeds", headers=auth_header(""))
     assert response.status_code == 401
+
+
+def test_settings_reads_optional_preview_credential(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://unit/test")
+    monkeypatch.setenv("CRAWLER_API_TOKEN", "unit-primary")
+    monkeypatch.setenv("CRAWLER_PREVIEW_TOKEN", "unit-preview")
+
+    settings = Settings.from_env()
+
+    assert settings.preview_token == "unit-preview"
