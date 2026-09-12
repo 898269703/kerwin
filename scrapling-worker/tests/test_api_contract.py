@@ -85,9 +85,15 @@ class FakeJobs:
         }
 
 
-def client(jobs=None):
+def client(jobs=None, oidc_verifier=None):
     jobs = jobs or FakeJobs()
-    app = create_app(repo=FakeRepo(), jobs=jobs, api_token="secret", health_check=lambda: True)
+    app = create_app(
+        repo=FakeRepo(),
+        jobs=jobs,
+        api_token="secret",
+        health_check=lambda: True,
+        oidc_verifier=oidc_verifier,
+    )
     return TestClient(app)
 
 
@@ -121,6 +127,23 @@ def test_management_routes_require_bearer_token():
     r = client().get("/v1/seeds")
     assert r.status_code == 401
     assert r.json()["error"] == "unauthorized"
+
+
+def test_management_routes_accept_verified_vercel_oidc():
+    r = client(oidc_verifier=lambda token: token == "valid-vercel-oidc").get(
+        "/v1/seeds",
+        headers={"authorization": "Bearer valid-vercel-oidc"},
+    )
+    assert r.status_code == 200
+    assert r.json()["seeds"][0]["id"] == "seed-1"
+
+
+def test_management_routes_reject_invalid_vercel_oidc():
+    r = client(oidc_verifier=lambda token: False).get(
+        "/v1/seeds",
+        headers={"authorization": "Bearer invalid-vercel-oidc"},
+    )
+    assert r.status_code == 401
 
 
 def test_seed_policy_can_be_enabled_disabled_and_scheduled():
