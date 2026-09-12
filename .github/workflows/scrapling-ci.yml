@@ -23,7 +23,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install 'scrapling[fetchers]==0.4.15' 'fastapi==0.116.1' 'uvicorn[standard]==0.35.0' 'psycopg[binary,pool]==3.2.10' 'httpx==0.28.1' 'pytest==8.4.1' 'pytest-asyncio==1.1.0'
+          pip install -e '.[dev]'
       - name: Test
         run: pytest -q
       - name: Compile
