@@ -104,5 +104,5 @@ test('polls real progress and promotes a newly ingested library PDF', async () =
   await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
   expect(screen.getByText('已找到并收录新的 PDF，可直接从本站下载。')).toBeInTheDocument();
   expect(screen.getByText('预算定额')).toBeInTheDocument();
-  expect(screen.getByText('本站已收录')).toBeInTheDocument();
+  expect(screen.getByText('本站已收录', { selector: '.topmark' })).toBeInTheDocument();
 });
