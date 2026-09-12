@@ -20,7 +20,13 @@ async def health_check() -> bool:
     return await db.ping()
 
 
-app = create_app(repo=repo, jobs=jobs, api_token=settings.api_token, health_check=health_check)
+app = create_app(
+    repo=repo,
+    jobs=jobs,
+    api_token=settings.api_token,
+    preview_token=settings.preview_token,
+    health_check=health_check,
+)
 
 
 @asynccontextmanager
