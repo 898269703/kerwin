@@ -1,4 +1,6 @@
 from fastapi.testclient import TestClient
+import pytest
+from urllib.parse import unquote
 
 from app.api import create_app
 
@@ -121,6 +123,46 @@ def test_public_file_returns_pdf_bytes():
     assert r.status_code == 200
     assert r.headers["content-type"] == "application/pdf"
     assert r.content.startswith(b"%PDF-")
+
+
+@pytest.mark.parametrize("path, disposition", [
+    ("/public/file?id=51957b6f-1111-2222-3333-444444444444", "inline"),
+    ("/v1/documents/51957b6f-1111-2222-3333-444444444444/file", "attachment"),
+])
+@pytest.mark.parametrize("filename, title, expected_name", [
+    ("预算定额.pdf", "ignored", "预算定额.pdf"),
+    (None, "工程费用.pdf", "工程费用.pdf"),
+    ('预算"定额\r\nX-Injected: yes/..\x00.pdf', "ignored", '预算_定额__X-Injected: yes_.._.pdf'),
+])
+def test_file_response_preserves_safe_unicode_filename(path, disposition, filename, title, expected_name):
+    class FileRepo(FakeRepo):
+        async def get_document_blob(self, document_id):
+            blob = await super().get_document_blob(document_id)
+            return {**blob, "filename": filename, "title": title}
+
+    app = create_app(repo=FileRepo(), jobs=FakeJobs(), api_token="secret", health_check=lambda: True)
+    response = TestClient(app, raise_server_exceptions=False).get(path, headers=auth())
+
+    assert response.status_code == 200
+    assert response.content == b"%PDF-test"
+    assert response.headers["content-type"] == "application/pdf"
+    header = response.headers["content-disposition"]
+    assert header.startswith(f'{disposition}; filename="document.pdf"; filename*=UTF-8\'\'')
+    assert header.isascii()
+    assert all(32 <= ord(char) < 127 for char in header)
+    assert unquote(header.split("filename*=UTF-8''", 1)[1]) == expected_name
+    assert "x-injected" not in response.headers
+
+
+@pytest.mark.parametrize("path, disposition", [
+    ("/public/file?id=51957b6f-1111-2222-3333-444444444444", "inline"),
+    ("/v1/documents/51957b6f-1111-2222-3333-444444444444/file", "attachment"),
+])
+def test_file_response_preserves_ascii_filename(path, disposition):
+    response = client().get(path, headers=auth())
+    assert response.status_code == 200
+    assert response.headers["content-disposition"] == f'{disposition}; filename="html40.pdf"'
+    assert response.content == b"%PDF-test"
 
 
 def test_management_routes_require_bearer_token():

@@ -15,9 +15,22 @@ const fakeJob = {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  Reflect.deleteProperty(globalThis, Symbol.for('@vercel/request-context'));
   delete process.env.CRAWLER_BASE_URL;
   delete process.env.CRAWLER_API_TOKEN;
   delete process.env.VERCEL_OIDC_TOKEN;
+});
+
+test('authenticates job creation and polling with the current function OIDC token', async () => {
+  process.env.VERCEL_OIDC_TOKEN = 'stale-build-token';
+  Reflect.set(globalThis, Symbol.for('@vercel/request-context'), {
+    get: () => ({ headers: { 'x-vercel-oidc-token': 'current-function-token' } }),
+  });
+  vi.stubGlobal('fetch', vi.fn(async (_url, init) => new Response(JSON.stringify({ job: fakeJob }), {
+    status: init.headers.authorization === 'Bearer current-function-token' ? 200 : 401,
+  })));
+  expect((await enqueueSearchDiscovery('https://example.gov/a', '156号')).id).toBe(fakeJob.id);
+  expect((await getCrawlJob(fakeJob.id)).id).toBe(fakeJob.id);
 });
 
 test('adds bearer token only to the server-side search-discovery request', async () => {

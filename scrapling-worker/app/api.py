@@ -3,7 +3,7 @@ from __future__ import annotations
 import hmac
 import inspect
 import re
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
@@ -17,7 +17,7 @@ def _json(status: int, body: dict):
 
 
 def _safe_filename(value: str | None) -> str:
-    name = re.sub(r'[\r\n"\\/]', "_", (value or "document.pdf")).strip()
+    name = re.sub(r'[\x00-\x1f\x7f"\\/]', "_", (value or "document.pdf")).strip()
     return name or "document.pdf"
 
 
@@ -135,11 +135,18 @@ def create_app(
         content = blob["content"]
         filename = _safe_filename(blob.get("filename") or blob.get("title"))
         disposition = "attachment" if attachment else "inline"
+        if filename.isascii():
+            content_disposition = f'{disposition}; filename="{filename}"'
+        else:
+            content_disposition = (
+                f'{disposition}; filename="document.pdf"; '
+                f"filename*=UTF-8''{quote(filename, safe='')}"
+            )
         return Response(
             content=content,
             media_type="application/pdf",
             headers={
-                "content-disposition": f'{disposition}; filename="{filename}"',
+                "content-disposition": content_disposition,
                 "x-content-type-options": "nosniff",
                 "cache-control": "private, max-age=0, must-revalidate" if attachment else "public, max-age=3600",
             },

@@ -1,11 +1,16 @@
+import { crawlerConfig } from '../../../../lib/crawler-client';
+
 const UUID_LIKE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 function safeFilename(disposition: string | null): string {
-  const match = disposition?.match(/filename\*?=(?:UTF-8''|"?)([^";]+)/i);
+  const extended = disposition?.match(/(?:^|;)\s*filename\*=UTF-8'[^']*'([^;]+)/i);
+  const match = extended ?? disposition?.match(/(?:^|;)\s*filename="?([^";]+)/i);
   if (!match) return 'document.pdf';
   let value = match[1].trim().replace(/^"|"$/g, '');
-  try { value = decodeURIComponent(value); } catch { /* keep raw value */ }
-  value = value.replace(/[\r\n\\/"<>:|?*]/g, '_').trim();
+  if (extended) {
+    try { value = decodeURIComponent(value); } catch { /* keep raw value */ }
+  }
+  value = value.replace(/[\x00-\x1f\x7f\\/"<>:|?*]/g, '_').trim();
   return value || 'document.pdf';
 }
 
@@ -16,19 +21,25 @@ export async function GET(request: Request): Promise<Response> {
     return Response.json({ error: 'valid document id is required' }, { status: 400 });
   }
 
-  const base = process.env.CRAWLER_BASE_URL?.trim().replace(/\/$/, '');
-  const token = process.env.CRAWLER_API_TOKEN?.trim();
-  if (!base || !token) {
+  let config: ReturnType<typeof crawlerConfig>;
+  try {
+    config = crawlerConfig();
+  } catch {
     return Response.json({ error: 'file service unavailable' }, { status: 503 });
   }
 
-  const upstream = await fetch(`${base}/v1/documents/${id}/file`, {
-    cache: 'no-store',
-    headers: {
-      authorization: `Bearer ${token}`,
-      accept: 'application/pdf',
-    },
-  });
+  let upstream: Response;
+  try {
+    upstream = await fetch(`${config.base}/v1/documents/${id}/file`, {
+      cache: 'no-store',
+      headers: {
+        authorization: `Bearer ${config.token}`,
+        accept: 'application/pdf',
+      },
+    });
+  } catch {
+    return Response.json({ error: 'file service unavailable' }, { status: 502 });
+  }
 
   if (!upstream.ok) {
     if (upstream.status === 404) {
@@ -43,14 +54,22 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   const filename = safeFilename(upstream.headers.get('content-disposition'));
+  const asciiFilename = /^[\x20-\x7e]+$/.test(filename) ? filename : 'document.pdf';
+  const encodedFilename = encodeURIComponent(filename).replace(/['()*]/g, (char) =>
+    `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
   const attachment = url.searchParams.get('download') === '1';
-  const bytes = await upstream.arrayBuffer();
+  let bytes: ArrayBuffer;
+  try {
+    bytes = await upstream.arrayBuffer();
+  } catch {
+    return Response.json({ error: 'file service unavailable' }, { status: 502 });
+  }
 
   return new Response(bytes, {
     status: 200,
     headers: {
       'content-type': 'application/pdf',
-      'content-disposition': `${attachment ? 'attachment' : 'inline'}; filename="${filename}"`,
+      'content-disposition': `${attachment ? 'attachment' : 'inline'}; filename="${asciiFilename}"; filename*=UTF-8''${encodedFilename}`,
       'x-content-type-options': 'nosniff',
       'cache-control': attachment ? 'private, max-age=0, must-revalidate' : 'private, max-age=300',
     },
