@@ -47,6 +47,7 @@ Source checkout: public GitHub repository `898269703/kerwin`, base `bd4b782`, is
 
 - `npm test -- library-file-route.test.ts crawler-client.test.ts`: 12 passed after the new tests first reproduced missing request-context OIDC support, Unicode filename handling, and unsanitized network failures.
 - `npm run build`: 10 test files and 33 tests passed; Next.js 16.3.3 production build and route generation passed.
+- `NODE_ENV=production npm run build`: the first Vercel Preview reproduced three `React.act` failures because Vitest inherited the production React runtime. The build script now forces `NODE_ENV=test` only for Vitest; the same production-environment command then passed 33 tests and the Next.js build.
 - `npx tsc --noEmit`: passed.
 - `/private/tmp/pdf-worker-tests-20260912/bin/python -m pytest -q`: 105 passed; one existing Starlette `anyio` deprecation warning.
 - `/private/tmp/pdf-worker-tests-20260912/bin/python -m compileall -q app`: passed.
@@ -58,5 +59,6 @@ Source checkout: public GitHub repository `898269703/kerwin`, base `bd4b782`, is
 ## Remaining release work and risks
 
 - A Vercel Preview built from the exact branch is still required for the same-origin search, preview, download, PDF signature, byte identity, and credential-exposure checks. Production has not been changed.
+- Preview deployment `dpl_6WFoX81UdK6SJ6CSKfy12fNJryKV` was confirmed as `target: null` and failed before runtime with `BUILD_UTILS_SPAWN_1`; it is retained as evidence for the production-environment test-mode fix and is not a passed Preview.
 - The Unicode worker response fix has automated coverage but is not live until the Railway worker is deployed through a reviewed configuration. Existing unrelated Railway staged settings must not be accepted as part of this change.
 - Existing crawl orchestration can still outlast the UI polling window when three jobs run serially, stops polling on a transient status-request failure, and may not persist the original direct-PDF query as searchable metadata. These are follow-up release risks outside this bounded authentication/download fix.
