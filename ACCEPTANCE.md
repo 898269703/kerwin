@@ -26,8 +26,8 @@ Iteration: 2026-09-12, frontend PDF proxy OIDC compatibility. This record separa
 - [x] Run from `frontend/`: focused tests, full test/build, and `npx tsc --noEmit` passed. Exact totals are recorded below.
 - [x] Run from `scrapling-worker/`: the full pytest suite and `python -m compileall -q app` passed in an isolated Python 3.12 environment.
 - [x] Run the app locally and verify known-library search; inspect retained layout on desktop and 390 x 844 viewports.
-- [ ] Verify a Vercel Preview built from the exact changed source: search a known library document, open and download through the Preview same-origin file route, require HTTP 200 / `application/pdf` / `%PDF-`, and compare bytes or SHA256 against the worker file response.
-- [ ] Confirm browser responses/assets do not expose crawler credentials; worker management remains authenticated. Record only masked/status evidence.
+- [x] Verify a Vercel Preview built from the exact changed frontend source: search a known library document, open and download through the Preview same-origin file route, require a real PDF / `%PDF-`, and compare bytes or SHA256 against the worker file response.
+- [x] Confirm inspected browser HTML does not expose crawler credential names or bearer values; worker management remains authenticated. Record only masked/status evidence.
 
 ## Existing wider release checks
 
@@ -55,10 +55,12 @@ Source checkout: public GitHub repository `898269703/kerwin`, base `bd4b782`, is
 - Local browser at `http://127.0.0.1:3210`: query `html40.pdf` returned exactly one existing-library result (`51957b6f-92ee-4785-98b5-9b2e34620c37`) with preview and download actions. Desktop and 390 x 844 screenshots showed no overlap or clipped primary controls; browser console remained empty.
 - Existing live Railway worker, read-only verification: `/health` returned `{"ok":true}`; public search found the same document; PDF GET returned HTTP 200, `application/pdf`, 2,136,233 bytes, `%PDF-`, and SHA256 `49e01b35fa91aa9592ecef9dae362ddb60e217d21e59646bb19b52f806a8bbe0`.
 - Codex Security diff scan `c6730e42-8391-4655-9732-aba0f4ce2940`: completed over four authentication/download surfaces with zero reportable findings. The scan records Preview OIDC verification as the remaining open question.
+- Vercel Preview `dpl_7hrQrQbwfYeKrYrfNv6cb4NhFfog`, `https://pdf-search-bwcy9pg8c-kerwin98.vercel.app`: `READY`, `target: null`, no alias, 33 Vercel-build tests passed, and the Next.js build completed. Browser search returned the known library result; same-origin download produced `/Users/k/Downloads/html40.pdf`, 2,136,233 bytes, `%PDF-1.1`, and the exact worker SHA256 above. No Preview-origin console warnings/errors were recorded.
+- The inspected Preview HTML contained no `CRAWLER_API_TOKEN`, `VERCEL_OIDC_TOKEN`, OIDC header name, or bearer value. Production was not redeployed or aliased during this iteration.
 
 ## Remaining release work and risks
 
-- A Vercel Preview built from the exact branch is still required for the same-origin search, preview, download, PDF signature, byte identity, and credential-exposure checks. Production has not been changed.
+- Preview runtime acceptance passed for frontend commit `9b42c9d`; production has not been changed.
 - Preview deployment `dpl_6WFoX81UdK6SJ6CSKfy12fNJryKV` was confirmed as `target: null` and failed before runtime with `BUILD_UTILS_SPAWN_1`; it is retained as evidence for the production-environment test-mode fix and is not a passed Preview.
 - The Unicode worker response fix has automated coverage but is not live until the Railway worker is deployed through a reviewed configuration. Existing unrelated Railway staged settings must not be accepted as part of this change.
 - Existing crawl orchestration can still outlast the UI polling window when three jobs run serially, stops polling on a transient status-request failure, and may not persist the original direct-PDF query as searchable metadata. These are follow-up release risks outside this bounded authentication/download fix.
