@@ -1,6 +1,6 @@
 # PDF Finder acceptance record
 
-Iteration: 2026-09-12 through 2026-09-14, frontend PDF proxy OIDC compatibility and production release. This record separates current-run evidence from historical checkpoints and records the bounded release independently from the wider crawler acceptance contract.
+Iteration: 2026-09-12 through 2026-09-15, frontend PDF proxy OIDC compatibility and production release. This record separates current-run evidence from historical checkpoints and records the bounded release independently from the wider crawler acceptance contract.
 
 ## Stage scope and evidence
 
@@ -13,8 +13,8 @@ Iteration: 2026-09-12 through 2026-09-14, frontend PDF proxy OIDC compatibility 
 | Implementation | File proxy shares existing server auth/base behavior; no schema/API shape change | Implemented on `codex/pdf-download-oidc-20260912`; focused tests cover the changed paths. |
 | Run App | Next.js dev server at `http://127.0.0.1:3210` | Known-library query returned the expected PDF result. |
 | Screenshot Visual QA | Desktop and 390 x 844 local-browser inspection | Passed for header, search field, examples, result card, preview/download actions, and console errors. |
-| Tests / build | Commands and cases below | Frontend 33 tests/build/typecheck and worker 108 tests passed in this run and in provider builds. |
-| Production readiness | Preview acceptance, merge, provider builds, live health, same-origin PDF bytes, and production browser search | The authentication/download slice is live and verified; the wider crawler contract remains open. |
+| Tests / build | Commands and cases below | The latest frontend passed 11 files / 40 tests, typecheck, and production build; unchanged Worker validation is retained below. |
+| Production readiness | Preview acceptance, merge, provider builds, live health, selected-source crawl, and same-origin PDF bytes | The user-selected crawl and download workflow is live and verified; public-source availability remains external. |
 
 ## Required checks for this fix
 
@@ -98,7 +98,7 @@ Source checkout: public GitHub repository `898269703/kerwin`, initial base `bd4b
 - Preview deployment `dpl_6WFoX81UdK6SJ6CSKfy12fNJryKV` was confirmed as `target: null` and failed before runtime with `BUILD_UTILS_SPAWN_1`; it is retained as evidence for the production-environment test-mode fix and is not a passed Preview.
 - Railway currently reports `GitHub Repo not found` for the service connection, so repository-driven automatic worker deployments are not restored. This release used the official Railway CLI with the exact project, environment, and service selected.
 - A separate Railway staging project was created, but the Trial resource limit rejected its Postgres service. It remains empty; no isolated staging deployment or production-data mutation occurred.
-- Existing crawl orchestration can still outlast the UI polling window when three jobs run serially and stops polling on a transient status-request failure. Persisting the original query as document metadata is intentionally unnecessary: the job-result ledger now supplies exact completed downloads without weakening metadata provenance.
+- Public-web metasearch cannot guarantee exhaustive coverage, and some selected hosts can block automated retrieval. The selected-source workflow exposes each failure independently, retries transient status reads, and lets the user choose another candidate without ingesting unselected results.
 - A CLI invocation before the correct Vercel project link was restored created an unused `kerwin98/frontend` project and deployment. It never received the `pdf-search-pwa` production alias or affected the production application. The user explicitly authorized cleanup on 2026-09-14, and `vercel project rm frontend --scope kerwin98` removed it successfully.
 
 ## 2026-09-14 user-selected crawl workflow
@@ -114,4 +114,9 @@ This bounded iteration supersedes automatic search-triggered ingestion. Existing
 - [x] Latest production build runtime smoke returned four candidates with `crawl.state=not_started` and zero jobs, started exactly one selected candidate, and rejected an unrelated public URL with HTTP 400 before Worker submission.
 - [x] Vercel Preview `dpl_BazRQXZ2Z9UNq2vW69shpbnsH1is` (`https://pdf-search-myim2luih-kerwin98.vercel.app`) reached READY with target Preview. Its provider build passed 11 files / 40 tests, TypeScript, and the Next.js build. Query `GB 50545-2010 架空输电线路设计规范 PDF` returned 36 web candidates with zero jobs before selection. One inaccessible selected source reached a visible failed state; a selected Zhejiang government PDF progressed through queued/running to succeeded with one discovered and one persisted PDF. The linked library card exposed preview/download, and the application console remained clean.
 - [x] Preview download `ae2ef8f30a5c45b5a8f15f8750123a2e.pdf` was a valid PDF 1.7 file: 8,218,426 bytes, `%PDF-1.7`, SHA256 `1d4a81ec865d33579842d3c296ca2b4c46e747a87c3cae163eacf733639358a3`.
-- [ ] Reviewed branch merges with required checks, production deploy reaches READY, and the same real user path passes at `https://pdf-search-pwa.vercel.app`.
+- [x] Reviewed branch merges with required checks, production deploy reaches READY, and the same real user path passes at `https://pdf-search-pwa.vercel.app`.
+- PR `#5` merged into `crawler-mvp` as `0cfe7eee19ed21a63a862bb16cbaa027ad60274e`; `PDF Finder Frontend CI / test-build` passed on the reviewed head.
+- Vercel production deployment `dpl_3PNajEfxcxeF4VUNUWYybKWAJp6b` (`https://pdf-search-50oge02u7-kerwin98.vercel.app`) reached READY and is aliased to `https://pdf-search-pwa.vercel.app`. Its provider build passed 11 files / 40 tests, TypeScript, and the Next.js 16.3.3 production build.
+- Production browser query `GB 50545-2010 架空输电线路设计规范 PDF` returned 20 web candidates and no crawl task before selection. Selecting only the Zhejiang government PDF and pressing `开始爬取` produced one completed job with one discovered and one persisted PDF; the refreshed results contained the linked library card with preview/download actions.
+- The production download `ae2ef8f30a5c45b5a8f15f8750123a2e (1).pdf` was PDF 1.7, 8,218,426 bytes, began with `%PDF-1.7`, and matched the Preview SHA256 `1d4a81ec865d33579842d3c296ca2b4c46e747a87c3cae163eacf733639358a3`.
+- Production browser warning/error logs were empty, and Vercel reported no error-level runtime logs during the verification window. The Worker was not redeployed because this iteration did not change Worker code, schema, or configuration.
