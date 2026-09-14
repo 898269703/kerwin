@@ -83,7 +83,11 @@ Source checkout: public GitHub repository `898269703/kerwin`, initial base `bd4b
 - [x] Frontend `npm test` passed 10 files / 34 tests; `npm run build` repeated 34 tests and passed TypeScript plus the Next.js production build.
 - [x] Worker Docker build ran 111 tests, `compileall`, and Scrapling dynamic verification successfully.
 - [x] Local production-server browser QA exercised the queued and completed states with a deterministic worker/search double. Desktop and 390 x 844 views showed the source-level crawl state, promoted library result, and visible preview/download controls without overlap; browser warnings/errors were empty.
-- [ ] Preview/production browser verification must show a real search miss progressing to a linked library card, and the same-origin download must return valid PDF bytes.
+- [x] Vercel Preview plus the deployed Worker showed a real search miss progressing to three linked library cards; same-origin preview and download returned a valid PDF.
+- Railway production Worker deployment `23731117-81dc-46ed-bf58-93ede6a85c23` reached `SUCCESS` after its Docker build and `/health` rollout check; the live health endpoint returned `{"ok":true}`.
+- Vercel Preview `dpl_5SjHeh1XwEokKfV84AyK6kXXKD1s`, `https://pdf-search-ok50xpwdk-kerwin98.vercel.app`, reached `READY` with `target: null`; its provider build passed 10 files / 34 tests and the Next.js build.
+- Preview browser query `电力施工安全规程 DL5009 PDF` returned 35 internet results, marked three direct-PDF candidates as `正在收录 PDF`, and reached the successful completion state with three promoted library cards and 38 total results. Each promoted card exposed `预览` and `下载`; the corresponding source cards showed `已收录，可在本站结果下载`.
+- The first promoted document opened in the browser PDF viewer as a 20-page PDF. Its same-origin download produced `45611f36d27a03a536adbaec89e150f583976f90.pdf`, 303,396 bytes, PDF 1.7, SHA256 `96743c326fe8912eb3127a371492ad96299c8cbdfbc0515f55777ddd404b3d32`.
 
 ## Remaining release work and risks
 
