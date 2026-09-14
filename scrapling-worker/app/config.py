@@ -57,18 +57,28 @@ class Settings:
         database_url = os.environ.get("DATABASE_URL", "").strip()
         api_token = os.environ.get("CRAWLER_API_TOKEN", "").strip()
         preview_token = os.environ.get("CRAWLER_PREVIEW_TOKEN", "").strip()
+        vercel_oidc_team_slug = os.environ.get("VERCEL_OIDC_TEAM_SLUG", "").strip()
+        vercel_oidc_team_id = os.environ.get("VERCEL_OIDC_TEAM_ID", "").strip()
+        vercel_oidc_project_id = os.environ.get("VERCEL_OIDC_PROJECT_ID", "").strip()
+        vercel_oidc_environments = _csv_env("VERCEL_OIDC_ENVIRONMENTS", "preview,production")
+        oidc_configured = bool(
+            vercel_oidc_team_slug
+            and vercel_oidc_team_id
+            and vercel_oidc_project_id
+            and vercel_oidc_environments
+        )
         if not database_url:
             raise RuntimeError("DATABASE_URL is required")
-        if not api_token:
-            raise RuntimeError("CRAWLER_API_TOKEN is required")
+        if not api_token and not oidc_configured:
+            raise RuntimeError("crawler authentication is required")
         return cls(
             database_url=database_url,
             api_token=api_token,
             preview_token=preview_token,
-            vercel_oidc_team_slug=os.environ.get("VERCEL_OIDC_TEAM_SLUG", "").strip(),
-            vercel_oidc_team_id=os.environ.get("VERCEL_OIDC_TEAM_ID", "").strip(),
-            vercel_oidc_project_id=os.environ.get("VERCEL_OIDC_PROJECT_ID", "").strip(),
-            vercel_oidc_environments=_csv_env("VERCEL_OIDC_ENVIRONMENTS", "preview,production"),
+            vercel_oidc_team_slug=vercel_oidc_team_slug,
+            vercel_oidc_team_id=vercel_oidc_team_id,
+            vercel_oidc_project_id=vercel_oidc_project_id,
+            vercel_oidc_environments=vercel_oidc_environments,
             data_dir=os.environ.get("DATA_DIR", "/data"),
             port=int(os.environ.get("PORT", "3001")),
             user_agent=os.environ.get("USER_AGENT", "PDF-Finder-Scrapling/1.0 (+public-document-crawler)"),

@@ -87,12 +87,12 @@ class FakeJobs:
         }
 
 
-def client(jobs=None, oidc_verifier=None):
+def client(jobs=None, oidc_verifier=None, api_token="secret"):
     jobs = jobs or FakeJobs()
     app = create_app(
         repo=FakeRepo(),
         jobs=jobs,
-        api_token="secret",
+        api_token=api_token,
         health_check=lambda: True,
         oidc_verifier=oidc_verifier,
     )
@@ -178,6 +178,14 @@ def test_management_routes_accept_verified_vercel_oidc():
     )
     assert r.status_code == 200
     assert r.json()["seeds"][0]["id"] == "seed-1"
+
+
+def test_management_routes_accept_verified_oidc_without_fallback_bearer():
+    r = client(oidc_verifier=lambda token: token == "valid-vercel-oidc", api_token="").get(
+        "/v1/seeds",
+        headers={"authorization": "Bearer valid-vercel-oidc"},
+    )
+    assert r.status_code == 200
 
 
 def test_management_routes_reject_invalid_vercel_oidc():
