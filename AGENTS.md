@@ -54,7 +54,7 @@ python -m compileall -q app
 uvicorn app.main:app --host 127.0.0.1 --port 3001
 ```
 
-The worker needs privately configured `DATABASE_URL` and `CRAWLER_API_TOKEN` to start; dynamic browser execution also requires Scrapling's browser dependencies. `scrapling-worker/Dockerfile` documents the existing container install/build/start path. Do not use production credentials or mutate production data merely to satisfy local startup.
+The worker needs privately configured `DATABASE_URL` plus either `CRAWLER_API_TOKEN` or the complete Vercel OIDC trust configuration to start; dynamic browser execution also requires Scrapling's browser dependencies. `scrapling-worker/Dockerfile` documents the existing container install/build/start path. Do not use production credentials or mutate production data merely to satisfy local startup.
 
 ## Boundaries and deployment ownership
 

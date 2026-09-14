@@ -49,7 +49,7 @@ Source checkout: public GitHub repository `898269703/kerwin`, base `bd4b782`, is
 - `npm run build`: 10 test files and 33 tests passed; Next.js 16.3.3 production build and route generation passed.
 - `NODE_ENV=production npm run build`: the first Vercel Preview reproduced three `React.act` failures because Vitest inherited the production React runtime. The build script now forces `NODE_ENV=test` only for Vitest; the same production-environment command then passed 33 tests and the Next.js build.
 - `npx tsc --noEmit`: passed.
-- `/private/tmp/pdf-worker-tests-20260912/bin/python -m pytest -q`: 105 passed; one existing Starlette `anyio` deprecation warning.
+- `/private/tmp/pdf-worker-tests-20260912/bin/python -m pytest -q`: 108 passed; one existing Starlette `anyio` deprecation warning.
 - `/private/tmp/pdf-worker-tests-20260912/bin/python -m compileall -q app`: passed.
 - `git diff --check`: passed before final staging.
 - Local browser at `http://127.0.0.1:3210`: query `html40.pdf` returned exactly one existing-library result (`51957b6f-92ee-4785-98b5-9b2e34620c37`) with preview and download actions. Desktop and 390 x 844 screenshots showed no overlap or clipped primary controls; browser console remained empty.
@@ -57,10 +57,13 @@ Source checkout: public GitHub repository `898269703/kerwin`, base `bd4b782`, is
 - Codex Security diff scan `c6730e42-8391-4655-9732-aba0f4ce2940`: completed over four authentication/download surfaces with zero reportable findings. The scan records Preview OIDC verification as the remaining open question.
 - Vercel Preview `dpl_7hrQrQbwfYeKrYrfNv6cb4NhFfog`, `https://pdf-search-bwcy9pg8c-kerwin98.vercel.app`: `READY`, `target: null`, no alias, 33 Vercel-build tests passed, and the Next.js build completed. Browser search returned the known library result; same-origin download produced `/Users/k/Downloads/html40.pdf`, 2,136,233 bytes, `%PDF-1.1`, and the exact worker SHA256 above. No Preview-origin console warnings/errors were recorded.
 - The inspected Preview HTML contained no `CRAWLER_API_TOKEN`, `VERCEL_OIDC_TOKEN`, OIDC header name, or bearer value. Production was not redeployed or aliased during this iteration.
+- Railway production configuration was rechecked after an operator-approved discard: the unrelated staged `npm start` and old `4baa38b` commit settings are gone, `staged` is `null`, and the running worker remains on the successful deployment `3f81a0d5-fdb2-42d2-b949-bec40cbf6da9`. Its committed start command is the Uvicorn command and its source remains commit `1afdc33`; discarding the staged settings did not redeploy the service.
+- Draft PR `#1` is mergeable at `a87ea82`. GitHub checks `PDF Finder Frontend CI / test-build` and `Scrapling Worker CI / test` both passed.
 
 ## Remaining release work and risks
 
 - Preview runtime acceptance passed for frontend commit `9b42c9d`; production has not been changed.
 - Preview deployment `dpl_6WFoX81UdK6SJ6CSKfy12fNJryKV` was confirmed as `target: null` and failed before runtime with `BUILD_UTILS_SPAWN_1`; it is retained as evidence for the production-environment test-mode fix and is not a passed Preview.
-- The Unicode worker response fix has automated coverage but is not live until the Railway worker is deployed through a reviewed configuration. Existing unrelated Railway staged settings must not be accepted as part of this change.
+- The Unicode worker response fix and OIDC-only startup mode have automated coverage but are not live until the Railway worker is deployed from the reviewed PR. The unrelated Railway staged settings were discarded and independently verified absent before release promotion.
+- A separate Railway staging project was created, but the Trial resource limit rejected its Postgres service. It remains empty; no isolated staging deployment or production-data mutation occurred.
 - Existing crawl orchestration can still outlast the UI polling window when three jobs run serially, stops polling on a transient status-request failure, and may not persist the original direct-PDF query as searchable metadata. These are follow-up release risks outside this bounded authentication/download fix.
