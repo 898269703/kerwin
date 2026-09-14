@@ -64,6 +64,16 @@ Source checkout: public GitHub repository `898269703/kerwin`, initial base `bd4b
 - Vercel production deployment `dpl_5u2XxLmvh2HnR4q5ucETUq3GJbiy` is `READY` and aliased to `https://pdf-search-pwa.vercel.app`. Its build passed 10 files / 33 tests, TypeScript checking, and the Next.js production build; no runtime errors were reported in the first 30 minutes.
 - Production browser search for `html40.pdf` returned exactly one verified library result with visible preview/download actions and no observed clipping or overlap. The production same-origin download returned HTTP 200, `application/pdf`, 2,136,233 bytes, `%PDF-1.1`, the same SHA256, `nosniff`, and a compatible ASCII plus UTF-8 content-disposition filename.
 
+### 2026-09-14 SearXNG JSON recovery
+
+- A production library-miss search exposed the user-visible fallback `深度查找暂时不可用`. Railway HTTP history showed every SearXNG `/search?format=json` request returning 403 from 2026-09-12 onward, while `/` still returned 200. The worker received no discovery-job request before the repair.
+- The prior Railway image-service configuration declared JSON in an inline start command, but the image deployment did not execute that command. The running instance therefore used SearXNG's default HTML-only settings. Config-only redeployment `3a70967a-6576-4b9d-ab1c-c13333837e25` confirmed the 403 persisted. A diagnostic settings-path variable made the missing generated file explicit in deployment `9a56255d-869f-4d0d-9466-3c4793e9d3c9`; it was immediately reverted and service health was restored by `a66863d7-2c68-4980-87f8-f0382644f983`.
+- `searxng/` now owns a reproducible image: upstream is pinned by digest, `settings.yml` is copied into the image, JSON is explicitly enabled, and the runtime signing secret is supplied only through Railway. The production secret was rotated without printing or committing its value.
+- Local `docker build -t pdf-finder-searxng:test .` passed. The built image returned HTTP 200 `application/json`, 20 results for `电力工程 PDF`, and a valid SearXNG payload.
+- Railway production deployment `afbb5dbb-1037-48bd-8465-d06f74456b2f` built the same Dockerfile and reached `SUCCESS`. Its live JSON endpoint returned HTTP 200 `application/json` with 39 results.
+- Vercel production `POST /api/search` then returned 39 web results, `crawl.state = started`, three queued jobs, and no warning. Railway recorded all three authenticated `POST /v1/search-discovery/jobs` calls as HTTP 202 and subsequent status reads as HTTP 200. The jobs reached terminal states (`failed`, `succeeded`, `succeeded`) without status warnings; two successful jobs each downloaded one file.
+- Browser QA on `https://pdf-search-pwa.vercel.app` showed 39 internet results and progressed from `正在准备深度查找…` to `深度查找已完成，暂未发现新的可下载 PDF。` without the unavailable fallback or layout overlap.
+
 ## Remaining release work and risks
 
 - Preview deployment `dpl_6WFoX81UdK6SJ6CSKfy12fNJryKV` was confirmed as `target: null` and failed before runtime with `BUILD_UTILS_SPAWN_1`; it is retained as evidence for the production-environment test-mode fix and is not a passed Preview.

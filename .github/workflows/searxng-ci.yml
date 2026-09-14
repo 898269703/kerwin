@@ -1,0 +1,42 @@
+name: SearXNG CI
+
+on:
+  pull_request:
+    paths:
+      - "searxng/**"
+      - ".github/workflows/searxng-ci.yml"
+  push:
+    branches:
+      - crawler-mvp
+    paths:
+      - "searxng/**"
+      - ".github/workflows/searxng-ci.yml"
+
+jobs:
+  json-api-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build pinned image
+        run: docker build -t pdf-finder-searxng:test searxng
+      - name: Start local service
+        run: docker run -d --name pdf-finder-searxng-test -p 127.0.0.1:18080:8080 -e SEARXNG_SECRET=ci-test-only pdf-finder-searxng:test
+      - name: Verify JSON API
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error --get \
+              --data-urlencode 'q=PDF' \
+              --data-urlencode 'format=json' \
+              --data-urlencode 'categories=general' \
+              http://127.0.0.1:18080/search > /tmp/searxng-response.json; then
+              python3 -c 'import json; payload=json.load(open("/tmp/searxng-response.json")); assert isinstance(payload.get("results"), list)'
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs pdf-finder-searxng-test
+          exit 1
+      - name: Show logs on failure
+        if: failure()
+        run: docker logs pdf-finder-searxng-test
