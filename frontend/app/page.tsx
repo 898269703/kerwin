@@ -11,7 +11,7 @@ const examples = [
 ];
 
 type CrawlView =
-  | { kind: 'queued'; pages: 0; pdfs: 0; downloads: 0 }
+  | { kind: 'queued'; pages: 0; pdfs: 0; downloads: 0; sources: number }
   | { kind: 'running'; pages: number; pdfs: number; downloads: number }
   | { kind: 'hit'; pages: number; pdfs: number; downloads: number }
   | { kind: 'no-hit'; pages: number; pdfs: number; downloads: number }
@@ -22,6 +22,13 @@ type StatusResponse = {
   jobs: CrawlJob[];
   libraryResults: SearchResult[];
   warnings?: string[];
+};
+
+type StartResponse = {
+  state?: 'started';
+  jobs?: CrawlJob[];
+  warnings?: string[];
+  error?: string;
 };
 
 function aggregateProgress(jobs: CrawlJob[]) {
@@ -35,15 +42,46 @@ function aggregateProgress(jobs: CrawlJob[]) {
   );
 }
 
+function resultUrl(result: SearchResult): string | undefined {
+  return result.finalUrl || result.url;
+}
+
+function sameUrl(left: string | undefined, right: string | undefined): boolean {
+  if (!left || !right) return false;
+  try {
+    return new URL(left).toString() === new URL(right).toString();
+  } catch {
+    return left === right;
+  }
+}
+
 function jobForResult(result: SearchResult, jobs: CrawlJob[] | undefined): CrawlJob | undefined {
-  const url = result.finalUrl || result.url;
-  return url ? jobs?.find((job) => job.startUrl === url) : undefined;
+  const url = resultUrl(result);
+  return jobs?.find((job) => sameUrl(job.startUrl, url));
+}
+
+function jobLabel(job: CrawlJob): string {
+  if (job.status === 'queued') return '等待抓取';
+  if (job.status === 'running') return '抓取中';
+  if (job.status === 'failed') return '失败';
+  if (job.status === 'partial') return '部分完成';
+  return job.filesDownloaded > 0 ? '已完成' : '完成，未发现 PDF';
 }
 
 function jobCopy(job: CrawlJob): string {
-  if (job.status === 'queued' || job.status === 'running') return '正在收录 PDF';
+  if (job.status === 'queued') return '等待抓取';
+  if (job.status === 'running') return '正在抓取此来源';
+  if (job.status === 'failed') return '抓取失败';
   if (job.filesDownloaded > 0) return '已收录，可在本站结果下载';
   return '未发现可收录 PDF';
+}
+
+function sourceLabel(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
 }
 
 function mergeWarnings(current: string[] | undefined, incoming: string[] | undefined) {
@@ -54,6 +92,8 @@ export default function Page() {
   const [query, setQuery] = useState('');
   const [data, setData] = useState<SearchResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [crawlStarting, setCrawlStarting] = useState(false);
+  const [selectedUrls, setSelectedUrls] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [crawlView, setCrawlView] = useState<CrawlView | null>(null);
   const generationRef = useRef(0);
@@ -71,10 +111,10 @@ export default function Page() {
     clearPollTimer();
   }, []);
 
-  function schedulePoll(value: string, jobIds: string[], generation: number, startedAt: number) {
+  function schedulePoll(value: string, jobIds: string[], generation: number, startedAt: number, failures = 0) {
     if (generation !== generationRef.current) return;
     const elapsed = Date.now() - startedAt;
-    if (elapsed >= 150_000) {
+    if (elapsed >= 300_000) {
       setCrawlView((view) => ({
         kind: 'unavailable',
         pages: view?.pages ?? 0,
@@ -84,10 +124,7 @@ export default function Page() {
       return;
     }
 
-    const delay = typeof document !== 'undefined' && document.visibilityState === 'hidden'
-      ? 8_000
-      : elapsed >= 30_000 ? 4_000 : 2_000;
-
+    const delay = typeof document !== 'undefined' && document.visibilityState === 'hidden' ? 5_000 : 1_000;
     timerRef.current = setTimeout(async () => {
       timerRef.current = null;
       if (generation !== generationRef.current) return;
@@ -98,7 +135,7 @@ export default function Page() {
       try {
         const response = await fetch(`/api/search/status?${params.toString()}`, { cache: 'no-store' });
         const payload = await response.json() as StatusResponse & { error?: string };
-        if (!response.ok) throw new Error(payload.error || '深度查找状态获取失败');
+        if (!response.ok) throw new Error(payload.error || '抓取状态获取失败');
         if (generation !== generationRef.current) return;
 
         const progress = aggregateProgress(payload.jobs ?? []);
@@ -108,7 +145,7 @@ export default function Page() {
             const libraryResults = payload.libraryResults ?? [];
             return {
               ...current,
-              crawl: current.crawl ? { ...current.crawl, state: 'complete', jobs: payload.jobs } : current.crawl,
+              crawl: { state: 'complete', jobs: payload.jobs },
               results: libraryResults.length > 0
                 ? mergePostCrawlResults(libraryResults, current.results)
                 : current.results,
@@ -119,18 +156,23 @@ export default function Page() {
             kind: (payload.libraryResults?.length ?? 0) > 0 ? 'hit' : 'no-hit',
             ...progress,
           });
+          setSelectedUrls([]);
           return;
         }
 
         setData((current) => current ? {
           ...current,
-          crawl: current.crawl ? { ...current.crawl, state: 'running', jobs: payload.jobs } : current.crawl,
+          crawl: { state: 'running', jobs: payload.jobs },
           warnings: mergeWarnings(current.warnings, payload.warnings),
         } : current);
         setCrawlView({ kind: 'running', ...progress });
-        schedulePoll(value, jobIds, generation, startedAt);
+        schedulePoll(value, jobIds, generation, startedAt, 0);
       } catch {
         if (generation !== generationRef.current) return;
+        if (failures < 2) {
+          schedulePoll(value, jobIds, generation, startedAt, failures + 1);
+          return;
+        }
         setCrawlView((view) => ({
           kind: 'unavailable',
           pages: view?.pages ?? 0,
@@ -150,8 +192,11 @@ export default function Page() {
     const generation = generationRef.current;
     clearPollTimer();
     setLoading(true);
+    setCrawlStarting(false);
+    setSelectedUrls([]);
     setError('');
     setCrawlView(null);
+    setData(null);
 
     try {
       const response = await fetch('/api/search', {
@@ -162,31 +207,64 @@ export default function Page() {
       const payload = await response.json() as SearchResponse & { error?: string };
       if (!response.ok) throw new Error(payload?.error || '搜索失败');
       if (generation !== generationRef.current) return;
-
       setData(payload);
-      const jobs = payload.crawl?.jobs ?? [];
-      if (payload.crawl?.state === 'started' && jobs.length > 0) {
-        setCrawlView({ kind: 'queued', pages: 0, pdfs: 0, downloads: 0 });
-        schedulePoll(value, jobs.map((job) => job.id), generation, Date.now());
-      } else if (payload.crawl?.state === 'unavailable') {
-        setCrawlView({ kind: 'unavailable', pages: 0, pdfs: 0, downloads: 0 });
-      }
     } catch (err) {
-      if (generation === generationRef.current) {
-        setError(err instanceof Error ? err.message : '搜索失败');
-      }
+      if (generation === generationRef.current) setError(err instanceof Error ? err.message : '搜索失败');
     } finally {
       if (generation === generationRef.current) setLoading(false);
     }
   }
 
-  function crawlCopy(view: CrawlView) {
-    if (view.kind === 'queued') return '正在准备深度查找：验证公开来源并收录 PDF，完成后提供本站下载。';
-    if (view.kind === 'running') return `正在抓取公开来源：已检查 ${view.pages} 个页面，发现 ${view.pdfs} 个 PDF，已收录 ${view.downloads} 个`;
-    if (view.kind === 'hit') return '已找到并收录新的 PDF，可直接从本站下载。';
-    if (view.kind === 'no-hit') return '深度查找已完成，暂未发现新的可下载 PDF。';
-    return '深度查找暂时不可用，已保留当前互联网搜索结果。';
+  function toggleSelection(url: string) {
+    setSelectedUrls((current) => {
+      if (current.some((item) => sameUrl(item, url))) return current.filter((item) => !sameUrl(item, url));
+      return current.length < 3 ? [...current, url] : current;
+    });
   }
+
+  async function startSelectedCrawl() {
+    if (!data || selectedUrls.length < 1 || selectedUrls.length > 3 || crawlStarting) return;
+    generationRef.current += 1;
+    const generation = generationRef.current;
+    clearPollTimer();
+    setCrawlStarting(true);
+    setError('');
+
+    try {
+      const response = await fetch('/api/crawl', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ query: data.query, urls: selectedUrls }),
+      });
+      const payload = await response.json() as StartResponse;
+      if (!response.ok || !payload.jobs?.length) throw new Error(payload.error || '抓取任务启动失败');
+      if (generation !== generationRef.current) return;
+
+      setData((current) => current ? {
+        ...current,
+        crawl: { state: 'started', jobs: payload.jobs! },
+        warnings: mergeWarnings(current.warnings, payload.warnings),
+      } : current);
+      setSelectedUrls(payload.jobs.map((job) => job.startUrl));
+      setCrawlView({ kind: 'queued', pages: 0, pdfs: 0, downloads: 0, sources: payload.jobs.length });
+      schedulePoll(data.query, payload.jobs.map((job) => job.id), generation, Date.now());
+    } catch (err) {
+      if (generation === generationRef.current) setError(err instanceof Error ? err.message : '抓取任务启动失败');
+    } finally {
+      if (generation === generationRef.current) setCrawlStarting(false);
+    }
+  }
+
+  function crawlCopy(view: CrawlView) {
+    if (view.kind === 'queued') return `已提交 ${view.sources} 个来源，正在等待抓取。`;
+    if (view.kind === 'running') return `正在抓取：已检查 ${view.pages} 个页面，发现 ${view.pdfs} 个 PDF，已收录 ${view.downloads} 个`;
+    if (view.kind === 'hit') return '已找到并收录新的 PDF，可直接从本站下载。';
+    if (view.kind === 'no-hit') return '抓取已完成，暂未发现新的可下载 PDF。';
+    return '抓取状态暂时不可用，后台任务仍会继续。请稍后重新搜索本站文件库。';
+  }
+
+  const webResults = data?.results.filter((result) => result.origin === 'web' && Boolean(resultUrl(result))) ?? [];
+  const crawlBusy = crawlStarting || crawlView?.kind === 'queued' || crawlView?.kind === 'running';
 
   return (
     <main>
@@ -202,7 +280,7 @@ export default function Page() {
         <div className="inner">
           <p className="eyebrow">技经文件获取</p>
           <h1>找到你真正需要的 PDF</h1>
-          <p className="subtitle">优先返回已收录文件；未收录时继续从公开互联网查找可信来源。</p>
+          <p className="subtitle">先检索本站文件库和公开互联网；选择可信来源后，再按需抓取并收录 PDF。</p>
           <form className="searchbox" onSubmit={submit}>
             <input
               value={query}
@@ -223,39 +301,84 @@ export default function Page() {
       <section className="results inner" aria-live="polite">
         {error && <div className="alert error">{error}</div>}
         {crawlView && <div className={`crawl-status ${crawlView.kind}`}>{crawlCopy(crawlView)}</div>}
+        {data?.crawl?.jobs && data.crawl.jobs.length > 0 && (
+          <div className="job-list" aria-label="抓取任务进度">
+            {data.crawl.jobs.map((job) => (
+              <div className={`job-row ${job.status}`} key={job.id}>
+                <div className="job-source" title={job.startUrl}>{sourceLabel(job.startUrl)}</div>
+                <strong>{jobLabel(job)}</strong>
+                <span>{job.pagesFetched} 个页面 · {job.filesDiscovered} 个 PDF · {job.filesDownloaded} 个已收录</span>
+              </div>
+            ))}
+          </div>
+        )}
         {data?.warnings?.map((warning) => <div className="alert warn" key={warning}>{warning}</div>)}
         {data && <div className="summary">找到 {data.results.length} 个结果</div>}
-        {data?.results.map((result, index) => (
-          <article className="card" key={`${result.libraryId || result.finalUrl || result.url || result.title}-${index}`}>
-            <div className="top">
-              <span className="topmark">{result.origin === 'library' ? '本站已收录' : '互联网来源'}</span>
-              <div className="meta">
-                <span className="badge">{result.sourceClass}</span>
-                {result.verified && <span className="badge verified">已验证</span>}
-                <span className="muted">相关度 {Math.round(result.score)}</span>
+        {webResults.length > 0 && (
+          <div className="crawl-controls">
+            <div>
+              <strong>选择要抓取的来源</strong>
+              <span>最多选择 3 个公开来源，提交后显示实时进度。</span>
+            </div>
+            <div className="crawl-controls-action">
+              <span>已选择 {selectedUrls.length} / 3 个来源</span>
+              <button
+                type="button"
+                onClick={startSelectedCrawl}
+                disabled={selectedUrls.length === 0 || crawlBusy}
+              >
+                {crawlStarting ? '正在启动…' : crawlBusy ? '抓取进行中' : '开始爬取'}
+              </button>
+            </div>
+          </div>
+        )}
+        {data?.results.map((result, index) => {
+          const url = resultUrl(result);
+          const selected = Boolean(url && selectedUrls.some((item) => sameUrl(item, url)));
+          const resultJob = jobForResult(result, data.crawl?.jobs);
+          const selectionDisabled = crawlBusy || (!selected && selectedUrls.length >= 3);
+          return (
+            <article className={`card${selected ? ' selected' : ''}`} key={`${result.libraryId || url || result.title}-${index}`}>
+              <div className="top">
+                <span className="topmark">{result.origin === 'library' ? '本站已收录' : '互联网来源'}</span>
+                <div className="meta">
+                  <span className="badge">{result.sourceClass}</span>
+                  {result.verified && <span className="badge verified">已验证</span>}
+                  <span className="muted">相关度 {Math.round(result.score)}</span>
+                </div>
               </div>
-            </div>
-            <h2>{result.title}</h2>
-            <p>{result.snippet}</p>
-            <div className="source">{result.source}</div>
-            {result.reasons.length > 0 && <div className="reasons">{result.reasons.join(' · ')}</div>}
-            <div className="actions">
-              {result.libraryId ? (
-                <>
-                  <a className="primary" href={`/api/library/file?id=${encodeURIComponent(result.libraryId)}`} target="_blank" rel="noreferrer">预览</a>
-                  <a href={`/api/library/file?id=${encodeURIComponent(result.libraryId)}&download=1`}>下载</a>
-                </>
-              ) : (
-                <>
-                  <a className="primary" href={result.finalUrl || result.url} target="_blank" rel="noreferrer">打开来源</a>
-                  {jobForResult(result, data.crawl?.jobs) && (
-                    <span className="crawl-action-status">{jobCopy(jobForResult(result, data.crawl?.jobs)!)}</span>
-                  )}
-                </>
-              )}
-            </div>
-          </article>
-        ))}
+              <h2>{result.title}</h2>
+              <p>{result.snippet}</p>
+              <div className="source">{result.source}</div>
+              {result.reasons.length > 0 && <div className="reasons">{result.reasons.join(' · ')}</div>}
+              <div className="actions">
+                {result.libraryId ? (
+                  <>
+                    <a className="primary" href={`/api/library/file?id=${encodeURIComponent(result.libraryId)}`} target="_blank" rel="noreferrer">预览</a>
+                    <a href={`/api/library/file?id=${encodeURIComponent(result.libraryId)}&download=1`}>下载</a>
+                  </>
+                ) : (
+                  <>
+                    <a className="primary" href={url} target="_blank" rel="noreferrer">打开来源</a>
+                    {url && (
+                      <label className={`source-select${selected ? ' checked' : ''}`}>
+                        <input
+                          type="checkbox"
+                          aria-label={`选择来源 ${index + 1}`}
+                          checked={selected}
+                          disabled={selectionDisabled}
+                          onChange={() => toggleSelection(url)}
+                        />
+                        {selected ? '已选择' : '选择此来源'}
+                      </label>
+                    )}
+                    {resultJob && <span className="crawl-action-status">{jobCopy(resultJob)}</span>}
+                  </>
+                )}
+              </div>
+            </article>
+          );
+        })}
         {data && data.results.length === 0 && <div className="empty">暂未找到匹配文件。</div>}
       </section>
     </main>

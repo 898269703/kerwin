@@ -39,38 +39,26 @@ function webResult(index: number, overrides: Record<string, unknown> = {}) {
   };
 }
 
-function job(index: number, url: string) {
-  return {
-    id: `00000000-0000-0000-0000-00000000000${index}`,
-    startUrl: url,
-    status: 'queued' as const,
-    pagesFetched: 0,
-    filesDiscovered: 0,
-    filesDownloaded: 0,
-    duplicatesFound: 0,
-    errorsCount: 0,
-    reused: false,
-  };
-}
-
 beforeEach(() => {
   vi.mocked(searchLibrary).mockReset();
   vi.mocked(searchWeb).mockReset();
   vi.mocked(enqueueSearchDiscovery).mockReset();
 });
 
-test('does not web-search or crawl when the library already has a result', async () => {
+test('returns library results first and still searches the web without crawling', async () => {
   vi.mocked(searchLibrary).mockResolvedValue([libraryResult]);
+  const candidate = webResult(0);
+  vi.mocked(searchWeb).mockResolvedValue([candidate]);
 
   const response = await runSearch('已收录文件');
 
-  expect(response.results).toEqual([libraryResult]);
-  expect(response.crawl?.state).toBe('not_needed');
-  expect(searchWeb).not.toHaveBeenCalled();
+  expect(response.results).toEqual([libraryResult, candidate]);
+  expect(response.crawl?.state).toBe('not_started');
+  expect(searchWeb).toHaveBeenCalledWith('已收录文件');
   expect(enqueueSearchDiscovery).not.toHaveBeenCalled();
 });
 
-test('on zero library hits returns web results immediately and enqueues at most three best candidates', async () => {
+test('on zero library hits returns every web candidate without enqueueing a crawl', async () => {
   const candidates = [
     webResult(0),
     webResult(1, { sourceClass: 'official', verified: true, score: 95, finalUrl: 'https://gov.example/a.pdf', url: 'https://gov.example/a.pdf' }),
@@ -80,45 +68,21 @@ test('on zero library hits returns web results immediately and enqueues at most 
   ];
   vi.mocked(searchLibrary).mockResolvedValue([]);
   vi.mocked(searchWeb).mockResolvedValue(candidates);
-  vi.mocked(enqueueSearchDiscovery).mockImplementation(async (url) => job(vi.mocked(enqueueSearchDiscovery).mock.calls.length, url));
 
   const response = await runSearch('预算定额');
 
   expect(response.results).toHaveLength(5);
-  expect(response.crawl?.state).toBe('started');
-  expect(response.crawl?.jobs).toHaveLength(3);
-  expect(enqueueSearchDiscovery).toHaveBeenCalledTimes(3);
-  const calledUrls = vi.mocked(enqueueSearchDiscovery).mock.calls.map(([url]) => url);
-  expect(calledUrls).toContain('https://gov.example/a.pdf');
-  expect(calledUrls).toContain('https://example2.com/page');
-  expect(calledUrls).toContain('https://example3.com/b.pdf');
+  expect(response.crawl).toEqual({ state: 'not_started', jobs: [] });
+  expect(enqueueSearchDiscovery).not.toHaveBeenCalled();
 });
 
-test('keeps web results and reports unavailable when every crawl enqueue fails', async () => {
-  const candidates = [webResult(0), webResult(1)];
+test('returns no-results state without contacting the crawler', async () => {
   vi.mocked(searchLibrary).mockResolvedValue([]);
-  vi.mocked(searchWeb).mockResolvedValue(candidates);
-  vi.mocked(enqueueSearchDiscovery).mockRejectedValue(new Error('crawler unavailable'));
+  vi.mocked(searchWeb).mockResolvedValue([]);
 
   const response = await runSearch('暂未收录');
 
-  expect(response.results).toEqual(candidates);
-  expect(response.crawl?.state).toBe('unavailable');
-  expect(response.crawl?.jobs).toEqual([]);
-  expect(response.warnings).toContain('深度查找暂时不可用，已保留当前互联网搜索结果。');
-});
-
-test('a single candidate failure does not cancel other crawl jobs', async () => {
-  const candidates = [webResult(0), webResult(1), webResult(2)];
-  vi.mocked(searchLibrary).mockResolvedValue([]);
-  vi.mocked(searchWeb).mockResolvedValue(candidates);
-  vi.mocked(enqueueSearchDiscovery)
-    .mockRejectedValueOnce(new Error('one failed'))
-    .mockImplementation(async (url) => job(2, url));
-
-  const response = await runSearch('预算文件');
-
-  expect(response.crawl?.state).toBe('started');
-  expect(response.crawl?.jobs).toHaveLength(2);
-  expect(response.warnings).toContain('部分深度查找任务未能启动。');
+  expect(response.results).toEqual([]);
+  expect(response.crawl).toEqual({ state: 'not_needed', jobs: [] });
+  expect(enqueueSearchDiscovery).not.toHaveBeenCalled();
 });

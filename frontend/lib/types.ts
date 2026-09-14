@@ -17,7 +17,7 @@ export interface SearchResult {
 }
 
 export type CrawlJobStatus = 'queued' | 'running' | 'succeeded' | 'partial' | 'failed';
-export type CrawlState = 'not_needed' | 'started' | 'running' | 'complete' | 'unavailable';
+export type CrawlState = 'not_needed' | 'not_started' | 'started' | 'running' | 'complete' | 'unavailable';
 
 export interface CrawlDocument {
   id: string;

@@ -1,10 +1,10 @@
 # PDF Finder product contract
 
-Updated: 2026-09-12. This is a concise index of the existing product and the current bounded continuation, not a new architecture proposal.
+Updated: 2026-09-14. This is a concise index of the existing product and the current bounded continuation, not a new architecture proposal.
 
 ## Product and users
 
-Help people find public technical PDFs by document title, number, or topic; prioritize the owned PDF library and visible source provenance, then discover public web candidates. A verified library result should open or download actual persisted PDF bytes through the application's own route. Public search users do not need crawler management credentials; authorized operators manage seeds and jobs through protected worker APIs.
+Help people find public technical PDFs by document title, number, or topic. Each search queries the owned PDF library and the public web, puts verified library files first, and keeps visible source provenance. Internet candidates are never ingested merely because they appeared in search: the user chooses up to three sources and explicitly starts crawling. A persisted library result opens or downloads actual PDF bytes through the application's own route. Public search users do not need crawler management credentials; authorized operators manage seeds and jobs through protected worker APIs.
 
 ## Existing contract reused
 
@@ -15,18 +15,20 @@ Help people find public technical PDFs by document title, number, or topic; prio
 
 ## Current iteration
 
-Fix the frontend PDF file proxy's inconsistent credential handling: an OIDC-configured Vercel environment that can call crawler jobs must also be able to fetch a known library PDF. Preserve explicit crawler base/token overrides and the existing server-client fallback behavior. Verify tests/build and the Preview user path, including PDF bytes and desktop/mobile screenshots. [ACCEPTANCE.md](ACCEPTANCE.md) owns the evidence checklist.
+Replace automatic search-triggered ingestion with a user-selected workflow. `POST /api/search` returns library and internet candidates without creating jobs. A separate server route accepts one to three selected public HTTP(S) sources, submits only those sources to the existing authenticated Worker, and returns job identities. The page polls real Worker counters every second while visible and shows each source as queued, running, succeeded, partial, or failed. Completed job-linked documents become library cards with preview and download actions. [ACCEPTANCE.md](ACCEPTANCE.md) owns the evidence checklist.
 
-Constraints: keep source-visible search and existing Chinese UI; keep bearer/OIDC credentials server-only; preserve authenticated `/v1/*` routes, safe filenames, inline/download semantics, and error responses; keep PostgreSQL data and existing document identity unchanged.
+Constraints: keep source-visible search and the existing Chinese design system; keep bearer/OIDC credentials server-only; preserve Worker SSRF, redirect, scope, size, PDF-byte, deduplication, and provenance checks; reject malformed, duplicate, private, or more than three selected URLs before Worker submission; keep existing document identity and persistence unchanged.
 
-Non-goals: redesign, new crawler technology, OCR/RAG/embeddings, authentication redesign, schema migration, permanent seed changes, broad crawling, production alias cutover, or retirement of rollback infrastructure.
+Non-goals: new crawler technology, OCR/RAG/embeddings, authentication redesign, schema migration, permanent seed changes, WebSocket/SSE infrastructure, or unbounded crawling.
 
 ## Design and stage reuse
 
 Reuse `frontend/app/globals.css` and current page components: system Chinese-capable fonts; ink `#172033`, blue `#275be8`, muted `#687386`, line `#e6eaf0`, white panels; maximum 980px content width, 32px outer allowance, and the existing 640px mobile breakpoint. Preserve search/loading/result/empty/error/progress states. This backend-route fix requires no new design exploration or Figma/Pixso structure. Browser screenshots validate the retained flow; they do not establish original-production visual parity unless compared to that reference.
 
-Product gate: the bounded goal and constraints are defined; implementation/verification can proceed. Current risks are credential availability/worker OIDC trust and the need for real Preview download evidence. Historical deployment evidence remains separate from this iteration.
+Product gate: the bounded goal and constraints are defined and user-approved. The current release must still pass implementation tests, responsive screenshot QA, Preview crawling, and production verification. Historical deployment evidence remains separate from this iteration.
 
 ## 2026-09-14 crawl-result download closure
 
 The user must be able to see that a library-miss search is actively crawling, and every PDF successfully persisted by those jobs must appear as a library result with preview/download actions. The association is recorded by job and document identity; the search phrase does not overwrite evidence-derived document metadata. Existing crawl limits, source links, SSRF checks, PDF-byte validation, deduplication, and server-only authentication remain in force.
+
+The user-selected workflow above supersedes the older automatic-trigger behavior in the linked search-miss design and frontend implementation plan. Those documents remain historical architecture evidence for the Worker and job-progress contracts.

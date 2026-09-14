@@ -1,27 +1,23 @@
 # PDF Finder user flow
 
-The full behavioral contract is the [existing search-miss design](docs/superpowers/specs/2026-09-08-search-miss-auto-crawl-design.md), sections 6 and 13–17. This iteration preserves these paths.
+Updated: 2026-09-14. This flow supersedes the automatic search-miss trigger in the historical design while reusing its Worker, validation, job ledger, progress, and download behavior.
 
-1. Open `/`. Enter a document number/title/topic or select an existing example. Submit search; the button reflects loading.
-2. `POST /api/search` searches the library and public web sources. Library hits appear first and avoid automatic crawl creation. Results retain source labels, evidence/verification indicators, reasons, and source URLs.
-3. With no library hit, the server may enqueue up to three bounded discovery candidates. Existing web results remain usable while a non-blocking panel shows queued/running counters.
-4. The browser polls `/api/search/status`; that route reads worker status and never enqueues. After terminal jobs, refreshed library hits replace matching web candidates. Polling ends at terminal state or the existing client time budget.
-5. A library result opens `/api/library/file?id=<document UUID>` inline or requests `download=1` for an attachment. The Next.js server authenticates to the worker and returns PDF bytes with a safe filename. No credential is returned to the browser.
+1. Open `/`, enter a document number, title, or topic, and submit. The new search clears any prior selection and stops polling that older search in this browser; already-submitted backend jobs continue independently.
+2. `POST /api/search` queries the owned library and the public web. Verified library files appear first with preview/download actions. Internet candidates retain source labels, verification indicators, reasons, and external links. Search itself creates no crawl job and persists nothing.
+3. Each internet candidate has `选择此来源`. The user may select one to three unique sources. At three selections, other unchecked candidates are disabled until one is deselected.
+4. The sticky selection panel shows the selected count and enables `开始爬取`. Clicking it sends the current query and exactly the selected URLs to `POST /api/crawl`. The server validates the query and public HTTP(S) URLs, then authenticates to the existing Worker. Credentials never enter browser responses or state.
+5. Each accepted source receives its own progress row. While the page is visible, the browser polls `/api/search/status` every second and displays real checked-page, discovered-PDF, and persisted-PDF counters. A hidden page polls more slowly. No percentage is shown because a crawl's total work is unknown.
+6. Jobs end as succeeded, partial, or failed. The status response carries the exact documents linked to those jobs. Persisted documents are promoted into library cards with `预览` and `下载`; web candidates remain available as provenance. A completed batch clears the selection so another batch can be chosen.
+7. A library action uses `/api/library/file?id=<document UUID>` for inline preview or adds `download=1` for attachment download. The Next.js server authenticates to the Worker and returns validated PDF bytes with a safe filename.
 
-For a library miss, the result list appears immediately while up to three bounded crawler jobs run. Each matching internet-source card shows its current ingestion state. When a job finishes, the status response carries the exact documents linked to that job; those documents are promoted into library cards with `预览` and `下载` actions even when the original search phrase is absent from the PDF filename or title.
+## Edge states
 
-## Download correction in this iteration
+- Empty or oversized queries are rejected without a search or crawler request.
+- Zero internet results shows the existing empty/library-only state and no crawl controls.
+- A malformed, credential-bearing, duplicate, non-HTTP(S), local/private, or more-than-three URL selection is rejected before Worker submission. The Worker remains authoritative for DNS, redirect, network-scope, byte-size, and PDF-content validation.
+- If only some selected jobs can start, accepted jobs continue and the UI shows a warning. If none start, candidates and selection remain available for retry.
+- A transient status error is retried twice. If status stays unavailable or the five-minute browser budget expires, the UI explains that backend work can continue and recommends a later library search.
+- Starting a new search invalidates older frontend responses so their progress cannot overwrite the new results.
+- Missing stored documents, upstream failure, or non-PDF content remain controlled server errors without credential or upstream-body leakage.
 
-The server should use an explicitly configured `CRAWLER_API_TOKEN` first and otherwise the existing `VERCEL_OIDC_TOKEN` fallback, with the same base-URL behavior as the crawler client. A Preview with only the established OIDC configuration should open/download a known library PDF. The browser URL and result-card behavior stay unchanged.
-
-## Existing edge states to preserve
-
-- Invalid file UUID: HTTP 400; no worker request.
-- No usable server credential: HTTP 503; no unauthenticated worker request.
-- Missing stored document: HTTP 404.
-- Upstream service failure or non-PDF response: controlled gateway/service error, without leaking credentials or upstream body details.
-- Empty search: existing validation; no arbitrary crawler request.
-- No search results: clear empty state. Worker/SearXNG failures retain any valid results and show the existing warning/unavailable state.
-- Search replacement and polling completion: old progress must not overwrite a newer search; no duplicate enqueue loop.
-
-Desktop/mobile acceptance follows the same sequence: load → search known library item → visible result → open/download → confirm real PDF response. A deterministic auto-crawl test, if run, is recorded separately from the download fix because it writes a job/document into the worker corpus.
+Desktop and mobile acceptance follow the same sequence: search → review candidates → select → start → observe independent progress → preview/download a persisted PDF.

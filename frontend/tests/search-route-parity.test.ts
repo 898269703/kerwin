@@ -36,26 +36,15 @@ const webResult = {
   finalUrl: 'https://example.gov/budget.pdf',
 };
 
-const crawlJob = {
-  id: '00000000-0000-0000-0000-000000000001',
-  startUrl: webResult.finalUrl,
-  status: 'queued' as const,
-  pagesFetched: 0,
-  filesDiscovered: 0,
-  filesDownloaded: 0,
-  duplicatesFound: 0,
-  errorsCount: 0,
-  reused: false,
-};
-
 beforeEach(() => {
   vi.mocked(searchLibrary).mockReset();
   vi.mocked(searchWeb).mockReset();
   vi.mocked(enqueueSearchDiscovery).mockReset();
 });
 
-test('library hit short-circuits web discovery and crawl', async () => {
+test('library hit is returned first while web candidates remain selectable', async () => {
   vi.mocked(searchLibrary).mockResolvedValue([libraryResult]);
+  vi.mocked(searchWeb).mockResolvedValue([webResult]);
 
   const response = await POST(new Request('http://localhost/api/search', {
     method: 'POST',
@@ -65,17 +54,16 @@ test('library hit short-circuits web discovery and crawl', async () => {
   const body = await response.json();
 
   expect(response.status).toBe(200);
-  expect(body.results[0].origin).toBe('library');
+  expect(body.results).toEqual([libraryResult, webResult]);
   expect(body.results[0].libraryId).toBe(libraryResult.libraryId);
-  expect(body.crawl.state).toBe('not_needed');
-  expect(searchWeb).not.toHaveBeenCalled();
+  expect(body.crawl.state).toBe('not_started');
+  expect(searchWeb).toHaveBeenCalledWith('国家电网财〔2014〕156号');
   expect(enqueueSearchDiscovery).not.toHaveBeenCalled();
 });
 
-test('zero library hit returns web results with a started crawl job', async () => {
+test('zero library hit returns web candidates and waits for explicit selection', async () => {
   vi.mocked(searchLibrary).mockResolvedValue([]);
   vi.mocked(searchWeb).mockResolvedValue([webResult]);
-  vi.mocked(enqueueSearchDiscovery).mockResolvedValue(crawlJob);
 
   const response = await POST(new Request('http://localhost/api/search', {
     method: 'POST',
@@ -86,9 +74,8 @@ test('zero library hit returns web results with a started crawl job', async () =
 
   expect(response.status).toBe(200);
   expect(body.results).toEqual([webResult]);
-  expect(body.crawl.state).toBe('started');
-  expect(body.crawl.jobs).toEqual([crawlJob]);
-  expect(enqueueSearchDiscovery).toHaveBeenCalledWith(webResult.finalUrl, '预算定额');
+  expect(body.crawl).toEqual({ state: 'not_started', jobs: [] });
+  expect(enqueueSearchDiscovery).not.toHaveBeenCalled();
 });
 
 test('rejects missing or oversized query', async () => {
