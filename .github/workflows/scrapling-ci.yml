@@ -6,6 +6,11 @@ on:
     paths:
       - 'scrapling-worker/**'
       - '.github/workflows/scrapling-ci.yml'
+  pull_request:
+    branches: [crawler-mvp]
+    paths:
+      - 'scrapling-worker/**'
+      - '.github/workflows/scrapling-ci.yml'
   workflow_dispatch:
 
 jobs:
