@@ -8,6 +8,8 @@ The full behavioral contract is the [existing search-miss design](docs/superpowe
 4. The browser polls `/api/search/status`; that route reads worker status and never enqueues. After terminal jobs, refreshed library hits replace matching web candidates. Polling ends at terminal state or the existing client time budget.
 5. A library result opens `/api/library/file?id=<document UUID>` inline or requests `download=1` for an attachment. The Next.js server authenticates to the worker and returns PDF bytes with a safe filename. No credential is returned to the browser.
 
+For a library miss, the result list appears immediately while up to three bounded crawler jobs run. Each matching internet-source card shows its current ingestion state. When a job finishes, the status response carries the exact documents linked to that job; those documents are promoted into library cards with `预览` and `下载` actions even when the original search phrase is absent from the PDF filename or title.
+
 ## Download correction in this iteration
 
 The server should use an explicitly configured `CRAWLER_API_TOKEN` first and otherwise the existing `VERCEL_OIDC_TOKEN` fallback, with the same base-URL behavior as the crawler client. A Preview with only the established OIDC configuration should open/download a known library PDF. The browser URL and result-card behavior stay unchanged.

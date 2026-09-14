@@ -1,5 +1,5 @@
 import { getVercelOidcTokenSync } from '@vercel/oidc';
-import type { CrawlJob } from './types';
+import type { CrawlDocument, CrawlJob } from './types';
 
 const DEFAULT_CRAWLER_BASE_URL = 'https://crawler-worker-production.up.railway.app';
 
@@ -43,6 +43,21 @@ function toJob(value: unknown): CrawlJob {
   if (!id || !startUrl || !['queued', 'running', 'succeeded', 'partial', 'failed'].includes(status)) {
     throw new Error('invalid crawler job payload');
   }
+  const documents = Array.isArray(row.documents)
+    ? row.documents.flatMap((value): CrawlDocument[] => {
+      if (!value || typeof value !== 'object') return [];
+      const document = value as Record<string, unknown>;
+      if (typeof document.id !== 'string' || typeof document.title !== 'string') return [];
+      return [{
+        id: document.id,
+        title: document.title,
+        filename: typeof document.filename === 'string' ? document.filename : null,
+        documentNumber: typeof document.documentNumber === 'string' ? document.documentNumber : null,
+        byteSize: Math.max(0, Number(document.byteSize ?? 0) || 0),
+        sourceCount: Math.max(0, Number(document.sourceCount ?? 0) || 0),
+      }];
+    })
+    : undefined;
   return {
     id,
     startUrl,
@@ -54,6 +69,7 @@ function toJob(value: unknown): CrawlJob {
     errorsCount: Number(row.errorsCount ?? 0) || 0,
     errorSummary: typeof row.errorSummary === 'string' ? row.errorSummary : null,
     reused: typeof row.reused === 'boolean' ? row.reused : undefined,
+    documents,
   };
 }
 

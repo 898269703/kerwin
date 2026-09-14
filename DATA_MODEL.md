@@ -1,6 +1,6 @@
 # PDF Finder data model
 
-Source of truth: [`scrapling-worker/migrations/001_init.sql`](scrapling-worker/migrations/001_init.sql), [`004_search_discovery.sql`](scrapling-worker/migrations/004_search_discovery.sql), repository implementation, and [`frontend/lib/types.ts`](frontend/lib/types.ts). This iteration changes no persistent entity, schema, or lifecycle.
+Source of truth: [`scrapling-worker/migrations/001_init.sql`](scrapling-worker/migrations/001_init.sql), [`004_search_discovery.sql`](scrapling-worker/migrations/004_search_discovery.sql), [`005_crawl_job_documents.sql`](scrapling-worker/migrations/005_crawl_job_documents.sql), repository implementation, and [`frontend/lib/types.ts`](frontend/lib/types.ts).
 
 | Entity | Identity / important fields | Relationships and lifecycle |
 | --- | --- | --- |
@@ -10,13 +10,14 @@ Source of truth: [`scrapling-worker/migrations/001_init.sql`](scrapling-worker/m
 | `seed_sites` | UUID; base URL; allowed hosts and patterns; depth/rate/concurrency/size limits; enabled flag; crawl interval | Persistent approved crawl policy. Zero interval disables scheduling. Search discovery does not create a seed. |
 | `crawl_jobs` | UUID; optional seed; trigger type; start/normalized URL; timestamps; state/counters/error summary | `queued → running → succeeded / partial / failed / cancelled` in SQL. Search discovery uses `trigger_type=discovery` and a null seed; URL indexes support dedupe/cooldown. |
 | `crawl_pages` | UUID; job UUID; URL/normalized URL; depth; HTTP/content metadata; title/error | Unique normalized URL per job; records crawl observations. |
+| `crawl_job_documents` | Crawl-job UUID plus document UUID; creation timestamp | Additive many-to-many result ledger. It records the exact validated PDFs produced or deduplicated by a job without changing document titles or treating a search phrase as authoritative metadata. |
 | `discovered_links` | UUID; unique normalized URL; referrer/anchor; host; likely-document flag; timestamps | Ingestion state: `new`, `queued`, `downloaded`, `rejected`, or `failed`. |
 
 ## Frontend contracts
 
 `SearchResult` holds origin (`library`/`web`), source class, verified flag, score, title, source, snippet, reasons, content length, optional URL/final URL, and optional library UUID. Scores and counters come from existing deterministic logic/worker data; do not invent successful ingestion.
 
-`SearchResponse` contains query, results, optional warnings, and optional crawl metadata. Crawl states are `not_needed`, `started`, `running`, `complete`, and `unavailable`. Frontend `CrawlJobStatus` currently represents `queued`, `running`, `succeeded`, `partial`, and `failed`; SQL also permits `cancelled`. This existing difference is not expanded or silently changed by the authentication fix.
+`SearchResponse` contains query, results, optional warnings, and optional crawl metadata. Crawl states are `not_needed`, `started`, `running`, `complete`, and `unavailable`. Frontend `CrawlJobStatus` currently represents `queued`, `running`, `succeeded`, `partial`, and `failed`; SQL also permits `cancelled`. A polled job can include the library-safe metadata of its linked documents, allowing the UI to expose preview/download without depending on a second fuzzy query match.
 
 The download request contains only a document UUID and optional `download=1`. Server configuration chooses a worker base and authentication token; neither the token nor its claims become document fields, browser payloads, or persisted frontend state. The response preserves the PDF byte content, safe filename, content type, disposition, and existing cache/security headers.
 

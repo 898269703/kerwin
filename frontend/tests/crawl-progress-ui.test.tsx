@@ -47,8 +47,9 @@ test('shows web results immediately while deep crawl is queued', async () => {
   render(<Page />);
   submitQuery();
 
-  expect(await screen.findByText('正在准备深度查找…')).toBeInTheDocument();
+  expect(await screen.findByText('正在准备深度查找：验证公开来源并收录 PDF，完成后提供本站下载。')).toBeInTheDocument();
   expect(screen.getByText('互联网候选标题')).toBeInTheDocument();
+  expect(screen.getByText('正在收录 PDF')).toBeInTheDocument();
 });
 
 test('polls real progress and promotes a newly ingested library PDF', async () => {
@@ -99,10 +100,18 @@ test('polls real progress and promotes a newly ingested library PDF', async () =
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
   await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
-  expect(screen.getByText('正在抓取公开来源：已检查 8 个页面，发现 2 个 PDF')).toBeInTheDocument();
+  expect(screen.getByText('正在抓取公开来源：已检查 8 个页面，发现 2 个 PDF，已收录 0 个')).toBeInTheDocument();
 
   await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
   expect(screen.getByText('已找到并收录新的 PDF，可直接从本站下载。')).toBeInTheDocument();
   expect(screen.getByText('预算定额')).toBeInTheDocument();
   expect(screen.getByText('本站已收录', { selector: '.topmark' })).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: '预览' })).toHaveAttribute(
+    'href',
+    '/api/library/file?id=51957b6f-1111-2222-3333-444444444444',
+  );
+  expect(screen.getByRole('link', { name: '下载' })).toHaveAttribute(
+    'href',
+    '/api/library/file?id=51957b6f-1111-2222-3333-444444444444&download=1',
+  );
 });

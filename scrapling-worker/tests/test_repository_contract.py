@@ -160,6 +160,57 @@ async def test_upsert_blob_marks_storage_hybrid():
 
 
 @pytest.mark.asyncio
+async def test_crawl_job_returns_the_documents_downloaded_by_that_job():
+    class JobResultDb(FakeDb):
+        async def fetch_one(self, sql, params=()):
+            self.calls.append(("fetch_one", sql, params))
+            if "FROM crawl_jobs" in sql:
+                return discovery_job("11111111-1111-1111-1111-111111111111", "succeeded")
+            return await super().fetch_one(sql, params)
+
+        async def fetch_all(self, sql, params=()):
+            self.calls.append(("fetch_all", sql, params))
+            if "FROM crawl_job_documents" in sql:
+                return [{
+                    "id": "doc-1",
+                    "preferred_title": "本次抓取.pdf",
+                    "preferred_filename": "download.pdf",
+                    "document_number": None,
+                    "byte_size": 2048,
+                    "source_count": 1,
+                }]
+            return []
+
+    db = JobResultDb()
+    repo = Repository(db)
+
+    job = await repo.get_crawl_job("11111111-1111-1111-1111-111111111111")
+
+    assert job["documents"] == [{
+        "id": "doc-1",
+        "title": "本次抓取.pdf",
+        "filename": "download.pdf",
+        "documentNumber": None,
+        "byteSize": 2048,
+        "sourceCount": 1,
+    }]
+    result_query = next(sql for kind, sql, _ in db.calls if kind == "fetch_all")
+    assert "crawl_job_documents" in result_query
+
+
+@pytest.mark.asyncio
+async def test_document_is_linked_to_its_crawl_job_idempotently():
+    db = FakeDb()
+    repo = Repository(db)
+
+    await repo.link_crawl_job_document(job_id="job-1", document_id="doc-1")
+
+    _, sql, params = next(call for call in db.calls if call[0] == "execute")
+    assert "ON CONFLICT (crawl_job_id,document_id) DO NOTHING" in " ".join(sql.split())
+    assert params == ("job-1", "doc-1")
+
+
+@pytest.mark.asyncio
 async def test_worker_restart_marks_interrupted_and_orphaned_jobs_failed():
     db = FakeDb()
     repo = Repository(db)

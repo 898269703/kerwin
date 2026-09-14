@@ -1,5 +1,5 @@
 import { getCrawlJob } from '../../../../lib/crawler-client';
-import { searchLibrary } from '../../../../lib/library';
+import { mapLibraryRows, searchLibrary } from '../../../../lib/library';
 
 const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const TERMINAL = new Set(['succeeded', 'partial', 'failed']);
@@ -30,10 +30,14 @@ export async function GET(request: Request): Promise<Response> {
   let libraryResults: Awaited<ReturnType<typeof searchLibrary>> = [];
 
   if (terminal) {
-    try {
-      libraryResults = await searchLibrary(query);
-    } catch {
-      warnings.push('深度查找已完成，但本站文件库刷新暂时失败。');
+    const crawledDocuments = jobs.flatMap((job) => job.documents ?? []);
+    libraryResults = mapLibraryRows(crawledDocuments.map((document) => ({ ...document, score: 1 })));
+    if (libraryResults.length === 0) {
+      try {
+        libraryResults = await searchLibrary(query);
+      } catch {
+        warnings.push('深度查找已完成，但本站文件库刷新暂时失败。');
+      }
     }
   }
 

@@ -1,7 +1,10 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 
 vi.mock('../lib/crawler-client', () => ({ getCrawlJob: vi.fn(), enqueueSearchDiscovery: vi.fn() }));
-vi.mock('../lib/library', () => ({ searchLibrary: vi.fn() }));
+vi.mock('../lib/library', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/library')>();
+  return { ...actual, searchLibrary: vi.fn() };
+});
 
 import { GET } from '../app/api/search/status/route';
 import { getCrawlJob } from '../lib/crawler-client';
@@ -23,6 +26,14 @@ const doneJob = {
   status: 'succeeded' as const,
   pagesFetched: 12,
   filesDownloaded: 1,
+  documents: [{
+    id: '51957b6f-1111-2222-3333-444444444444',
+    title: '预算定额',
+    filename: 'budget.pdf',
+    documentNumber: null,
+    byteSize: 1024,
+    sourceCount: 1,
+  }],
 };
 
 const libraryResult = {
@@ -75,9 +86,8 @@ test('returns running progress without refreshing the library', async () => {
   expect(searchLibrary).not.toHaveBeenCalled();
 });
 
-test('refreshes the library once every job is terminal', async () => {
+test('returns documents downloaded by the completed jobs even when the query is absent from document metadata', async () => {
   vi.mocked(getCrawlJob).mockResolvedValue(doneJob);
-  vi.mocked(searchLibrary).mockResolvedValue([libraryResult]);
 
   const response = await GET(new Request(
     `http://localhost/api/search/status?q=${encodeURIComponent('预算定额')}&jobId=${doneJob.id}`,
@@ -87,6 +97,19 @@ test('refreshes the library once every job is terminal', async () => {
   expect(response.status).toBe(200);
   expect(body.state).toBe('complete');
   expect(body.jobs).toEqual([doneJob]);
+  expect(body.libraryResults).toEqual([{ ...libraryResult, score: 100 }]);
+  expect(searchLibrary).not.toHaveBeenCalled();
+});
+
+test('falls back to query refresh for jobs created before result tracking existed', async () => {
+  vi.mocked(getCrawlJob).mockResolvedValue({ ...doneJob, documents: undefined });
+  vi.mocked(searchLibrary).mockResolvedValue([libraryResult]);
+
+  const response = await GET(new Request(
+    `http://localhost/api/search/status?q=${encodeURIComponent('预算定额')}&jobId=${doneJob.id}`,
+  ));
+  const body = await response.json();
+
   expect(body.libraryResults).toEqual([libraryResult]);
   expect(searchLibrary).toHaveBeenCalledWith('预算定额');
 });

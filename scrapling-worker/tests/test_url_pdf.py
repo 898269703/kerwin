@@ -37,6 +37,7 @@ def test_storage_key_is_content_addressed():
 class FakeRepo:
     def __init__(self):
         self.blob = None
+        self.job_links = []
 
     async def upsert_document_by_hash(self, **kwargs):
         return {"document": {"id": "doc-1", "storageKey": kwargs["storage_key"]}, "duplicate": False}
@@ -46,6 +47,9 @@ class FakeRepo:
 
     async def upsert_document_source(self, **kwargs):
         return None
+
+    async def link_crawl_job_document(self, **kwargs):
+        self.job_links.append(kwargs)
 
 
 @pytest.mark.asyncio
@@ -66,6 +70,8 @@ async def test_first_persist_is_not_reported_as_duplicate(tmp_path):
         data_dir=str(tmp_path),
         referrer_url="https://www.w3.org/",
         anchor_text="A PDF",
+        crawl_job_id="job-1",
     )
     assert result["duplicate"] is False
     assert repo.blob == content
+    assert repo.job_links == [{"job_id": "job-1", "document_id": "doc-1"}]

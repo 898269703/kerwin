@@ -157,7 +157,7 @@ class CrawlerJobs:
                 user_agent=self.settings.user_agent,
             )
             result = await persist_pdf(repo=self.repo, downloaded=downloaded, data_dir=self.settings.data_dir,
-                                       referrer_url=item.referrer_url, anchor_text=None)
+                                       referrer_url=item.referrer_url, anchor_text=None, crawl_job_id=item.job_id)
             await self.repo.mark_discovered_status(normalized, "downloaded")
             await self.repo.update_crawl_job(
                 item.job_id, files_discovered=1, files_downloaded=1,
@@ -210,6 +210,7 @@ class CrawlerJobs:
                 data_dir=self.settings.data_dir,
                 referrer_url=None,
                 anchor_text=None,
+                crawl_job_id=item.job_id,
             )
             await self.repo.mark_discovered_status(candidate.normalized_url, "downloaded")
             await self.repo.update_crawl_job(
@@ -332,6 +333,7 @@ class CrawlerJobs:
                     data_dir=self.settings.data_dir,
                     referrer_url=crawl_item.get("referrerUrl"),
                     anchor_text=crawl_item.get("anchorText"),
+                    crawl_job_id=item.job_id,
                 )
                 await self.repo.mark_discovered_status(normalized, "downloaded")
                 downloaded_count += 1

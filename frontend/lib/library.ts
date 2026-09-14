@@ -1,6 +1,6 @@
 import type { SearchResult } from './types';
 
-type LibraryRow = {
+export type LibraryRow = {
   id?: string;
   title?: string;
   filename?: string | null;
@@ -34,7 +34,11 @@ export async function searchLibrary(query: string): Promise<SearchResult[]> {
   }
 
   const payload = (await response.json()) as LibraryPayload;
-  return (payload.results ?? []).flatMap((row): SearchResult[] => {
+  return mapLibraryRows(payload.results ?? []);
+}
+
+export function mapLibraryRows(rows: LibraryRow[]): SearchResult[] {
+  return rows.flatMap((row): SearchResult[] => {
     if (!row.id || !row.title) return [];
     const sourceCount = Math.max(0, Number(row.sourceCount ?? 0));
     const backendScore = Number(row.score ?? 0);

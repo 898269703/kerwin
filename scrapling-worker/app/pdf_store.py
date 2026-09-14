@@ -89,7 +89,7 @@ async def download_pdf(*, url: str, allowed_hosts: set[str], max_bytes: int, use
 
 
 async def persist_pdf(*, repo, downloaded: DownloadedPdf, data_dir: str, referrer_url: str | None,
-                      anchor_text: str | None):
+                      anchor_text: str | None, crawl_job_id: str | None = None):
     key = storage_key_for_hash(downloaded.sha256)
     absolute = Path(data_dir) / key
     absolute.parent.mkdir(parents=True, exist_ok=True)
@@ -121,4 +121,6 @@ async def persist_pdf(*, repo, downloaded: DownloadedPdf, data_dir: str, referre
         http_filename=downloaded.http_filename,
         last_http_status=downloaded.status_code,
     )
+    if crawl_job_id:
+        await repo.link_crawl_job_document(job_id=crawl_job_id, document_id=document["id"])
     return {"document": document, "duplicate": bool(upserted["duplicate"] or file_existed), "storageKey": key}
