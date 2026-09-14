@@ -24,6 +24,7 @@ At each stage record completed work, evidence files/commands/screenshots/URLs, c
 - Browser entry: `frontend/app/page.tsx`; root metadata: `app/layout.tsx`; styling: `app/globals.css`; PWA manifest: `app/manifest.ts` (paths relative to `frontend/`).
 - Frontend routes: `POST /api/search`, `GET /api/search/status`, `GET /api/library/file`. Server adapters/orchestration live in `frontend/lib/`; Vitest/Testing Library checks in `frontend/tests/`.
 - `scrapling-worker/`: Python >=3.12; Scrapling **0.4.15**, FastAPI/Uvicorn, psycopg 3, httpx, PyJWT. `app/main.py` composes settings, database, repository, queue, auth, and API; `app/api.py` defines HTTP routes.
+- `searxng/`: pinned upstream SearXNG image plus the checked-in settings required by the frontend JSON search adapter. Railway must provide `SEARXNG_SECRET`; never commit or print its value.
 - Worker source is `scrapling-worker/app/`; SQL is `scrapling-worker/migrations/`; tests are `scrapling-worker/tests/`. PostgreSQL catalog and `document_blobs` preserve PDF bytes; `/data` is cache/temp, not the only durable copy.
 - `crawler-worker/` is the legacy TypeScript/Crawlee rollback source according to the deployment checkpoint. Do not modernize, delete, or redeploy it as part of an unrelated frontend fix.
 - GitHub CI definitions: `.github/workflows/frontend-ci.yml` and `.github/workflows/scrapling-ci.yml`.
@@ -52,6 +53,14 @@ python -m pip install -e '.[dev]'
 python -m pytest -q
 python -m compileall -q app
 uvicorn app.main:app --host 127.0.0.1 --port 3001
+```
+
+Build the SearXNG service from `searxng/` and verify its JSON API before deployment:
+
+```sh
+docker build -t pdf-finder-searxng:test .
+docker run --rm -p 127.0.0.1:18080:8080 -e SEARXNG_SECRET=local-test-only pdf-finder-searxng:test
+curl --get --data-urlencode 'q=电力工程 PDF' --data-urlencode 'format=json' --data-urlencode 'categories=general' http://127.0.0.1:18080/search
 ```
 
 The worker needs privately configured `DATABASE_URL` plus either `CRAWLER_API_TOKEN` or the complete Vercel OIDC trust configuration to start; dynamic browser execution also requires Scrapling's browser dependencies. `scrapling-worker/Dockerfile` documents the existing container install/build/start path. Do not use production credentials or mutate production data merely to satisfy local startup.
