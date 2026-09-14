@@ -88,6 +88,10 @@ Source checkout: public GitHub repository `898269703/kerwin`, initial base `bd4b
 - Vercel Preview `dpl_5SjHeh1XwEokKfV84AyK6kXXKD1s`, `https://pdf-search-ok50xpwdk-kerwin98.vercel.app`, reached `READY` with `target: null`; its provider build passed 10 files / 34 tests and the Next.js build.
 - Preview browser query `电力施工安全规程 DL5009 PDF` returned 35 internet results, marked three direct-PDF candidates as `正在收录 PDF`, and reached the successful completion state with three promoted library cards and 38 total results. Each promoted card exposed `预览` and `下载`; the corresponding source cards showed `已收录，可在本站结果下载`.
 - The first promoted document opened in the browser PDF viewer as a 20-page PDF. Its same-origin download produced `45611f36d27a03a536adbaec89e150f583976f90.pdf`, 303,396 bytes, PDF 1.7, SHA256 `96743c326fe8912eb3127a371492ad96299c8cbdfbc0515f55777ddd404b3d32`.
+- PR `#4` merged into `crawler-mvp` as `a696ec4af793a5ed5c41dc3b0c3778bafbcf582b`; both required GitHub checks passed on the final branch head.
+- Vercel production deployment `dpl_D4aL1YAAZr57G1Z7uBohUMAdjz4N` reached `READY` and was aliased to `https://pdf-search-pwa.vercel.app`; its build passed the same 10 files / 34 tests and Next.js production build.
+- Production browser verification reused the three completed jobs: the visible state progressed from the explanatory crawl message and 35 internet results to three promoted library cards and 38 total results. Production console warnings/errors for the application origin were empty.
+- The production `下载` action produced a second 303,396-byte, 20-page PDF 1.7 file with the same SHA256 `96743c326fe8912eb3127a371492ad96299c8cbdfbc0515f55777ddd404b3d32`.
 
 ## Remaining release work and risks
 
@@ -95,3 +99,4 @@ Source checkout: public GitHub repository `898269703/kerwin`, initial base `bd4b
 - Railway currently reports `GitHub Repo not found` for the service connection, so repository-driven automatic worker deployments are not restored. This release used the official Railway CLI with the exact project, environment, and service selected.
 - A separate Railway staging project was created, but the Trial resource limit rejected its Postgres service. It remains empty; no isolated staging deployment or production-data mutation occurred.
 - Existing crawl orchestration can still outlast the UI polling window when three jobs run serially and stops polling on a transient status-request failure. Persisting the original query as document metadata is intentionally unnecessary: the job-result ledger now supplies exact completed downloads without weakening metadata provenance.
+- A CLI invocation before the correct Vercel project link was restored created an unused `kerwin98/frontend` project and deployment. It never received the `pdf-search-pwa` production alias or affected the production application. Automated approval rejected permanent project deletion; explicit destructive cleanup authorization remains required.
