@@ -1,0 +1,7 @@
+frontend/.next/
+frontend/node_modules/
+frontend/next-env.d.ts
+frontend/tsconfig.tsbuildinfo
+scrapling-worker/**/__pycache__/
+scrapling-worker/.pytest_cache/
+*.pyc
