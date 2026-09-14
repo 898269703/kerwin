@@ -26,3 +26,7 @@ Non-goals: redesign, new crawler technology, OCR/RAG/embeddings, authentication 
 Reuse `frontend/app/globals.css` and current page components: system Chinese-capable fonts; ink `#172033`, blue `#275be8`, muted `#687386`, line `#e6eaf0`, white panels; maximum 980px content width, 32px outer allowance, and the existing 640px mobile breakpoint. Preserve search/loading/result/empty/error/progress states. This backend-route fix requires no new design exploration or Figma/Pixso structure. Browser screenshots validate the retained flow; they do not establish original-production visual parity unless compared to that reference.
 
 Product gate: the bounded goal and constraints are defined; implementation/verification can proceed. Current risks are credential availability/worker OIDC trust and the need for real Preview download evidence. Historical deployment evidence remains separate from this iteration.
+
+## 2026-09-14 crawl-result download closure
+
+The user must be able to see that a library-miss search is actively crawling, and every PDF successfully persisted by those jobs must appear as a library result with preview/download actions. The association is recorded by job and document identity; the search phrase does not overwrite evidence-derived document metadata. Existing crawl limits, source links, SSRF checks, PDF-byte validation, deduplication, and server-only authentication remain in force.

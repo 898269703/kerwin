@@ -72,14 +72,30 @@ test('polls a crawl job through the protected worker API', async () => {
   process.env.CRAWLER_BASE_URL = 'https://crawler.example';
   process.env.CRAWLER_API_TOKEN = 'server-secret';
   const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-    job: { ...fakeJob, status: 'running', pagesFetched: 8 },
+    job: {
+      ...fakeJob,
+      status: 'succeeded',
+      pagesFetched: 8,
+      filesDownloaded: 1,
+      documents: [{
+        id: '51957b6f-1111-2222-3333-444444444444',
+        title: '已抓取文件.pdf',
+        filename: 'download.pdf',
+        byteSize: 2048,
+        sourceCount: 1,
+      }],
+    },
   }), { status: 200 }));
   vi.stubGlobal('fetch', fetchMock);
 
   const job = await getCrawlJob(fakeJob.id);
 
-  expect(job.status).toBe('running');
+  expect(job.status).toBe('succeeded');
   expect(job.pagesFetched).toBe(8);
+  expect(job.documents).toEqual([expect.objectContaining({
+    id: '51957b6f-1111-2222-3333-444444444444',
+    title: '已抓取文件.pdf',
+  })]);
   expect(fetchMock).toHaveBeenCalledWith(
     `https://crawler.example/v1/crawl/jobs/${fakeJob.id}`,
     expect.objectContaining({

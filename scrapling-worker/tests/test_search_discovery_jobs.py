@@ -153,6 +153,7 @@ async def test_search_discovery_direct_pdf_bypasses_spider(monkeypatch):
     async def fake_persist_pdf(**kwargs):
         calls["persist"] += 1
         assert kwargs["referrer_url"] is None
+        assert kwargs["crawl_job_id"] == "job-pdf"
         return {"duplicate": False}
 
     monkeypatch.setattr(jobs_module, "PdfDiscoverySpider", ForbiddenSpider)

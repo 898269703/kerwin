@@ -74,9 +74,24 @@ Source checkout: public GitHub repository `898269703/kerwin`, initial base `bd4b
 - Vercel production `POST /api/search` then returned 39 web results, `crawl.state = started`, three queued jobs, and no warning. Railway recorded all three authenticated `POST /v1/search-discovery/jobs` calls as HTTP 202 and subsequent status reads as HTTP 200. The jobs reached terminal states (`failed`, `succeeded`, `succeeded`) without status warnings; two successful jobs each downloaded one file.
 - Browser QA on `https://pdf-search-pwa.vercel.app` showed 39 internet results and progressed from `正在准备深度查找…` to `深度查找已完成，暂未发现新的可下载 PDF。` without the unavailable fallback or layout overlap.
 
+### 2026-09-14 crawler-result download closure
+
+- [x] Reproduced the gap: successful discovery jobs incremented `filesDownloaded`, but the status route exposed only a second query-based library search, so unrelated filenames were omitted.
+- [x] Added the additive `crawl_job_documents` result ledger and linked both new and deduplicated persisted PDFs to the executing job.
+- [x] Protected job status now returns linked document metadata; the frontend promotes those exact documents to library cards and retains the older query refresh as migration compatibility.
+- [x] Internet-source cards show `正在收录 PDF`, successful completion, or no-result state. Global progress reports checked pages, discovered PDFs, and persisted PDFs; completed library cards expose both `预览` and `下载`.
+- [x] Frontend `npm test` passed 10 files / 34 tests; `npm run build` repeated 34 tests and passed TypeScript plus the Next.js production build.
+- [x] Worker Docker build ran 111 tests, `compileall`, and Scrapling dynamic verification successfully.
+- [x] Local production-server browser QA exercised the queued and completed states with a deterministic worker/search double. Desktop and 390 x 844 views showed the source-level crawl state, promoted library result, and visible preview/download controls without overlap; browser warnings/errors were empty.
+- [x] Vercel Preview plus the deployed Worker showed a real search miss progressing to three linked library cards; same-origin preview and download returned a valid PDF.
+- Railway production Worker deployment `23731117-81dc-46ed-bf58-93ede6a85c23` reached `SUCCESS` after its Docker build and `/health` rollout check; the live health endpoint returned `{"ok":true}`.
+- Vercel Preview `dpl_5SjHeh1XwEokKfV84AyK6kXXKD1s`, `https://pdf-search-ok50xpwdk-kerwin98.vercel.app`, reached `READY` with `target: null`; its provider build passed 10 files / 34 tests and the Next.js build.
+- Preview browser query `电力施工安全规程 DL5009 PDF` returned 35 internet results, marked three direct-PDF candidates as `正在收录 PDF`, and reached the successful completion state with three promoted library cards and 38 total results. Each promoted card exposed `预览` and `下载`; the corresponding source cards showed `已收录，可在本站结果下载`.
+- The first promoted document opened in the browser PDF viewer as a 20-page PDF. Its same-origin download produced `45611f36d27a03a536adbaec89e150f583976f90.pdf`, 303,396 bytes, PDF 1.7, SHA256 `96743c326fe8912eb3127a371492ad96299c8cbdfbc0515f55777ddd404b3d32`.
+
 ## Remaining release work and risks
 
 - Preview deployment `dpl_6WFoX81UdK6SJ6CSKfy12fNJryKV` was confirmed as `target: null` and failed before runtime with `BUILD_UTILS_SPAWN_1`; it is retained as evidence for the production-environment test-mode fix and is not a passed Preview.
 - Railway currently reports `GitHub Repo not found` for the service connection, so repository-driven automatic worker deployments are not restored. This release used the official Railway CLI with the exact project, environment, and service selected.
 - A separate Railway staging project was created, but the Trial resource limit rejected its Postgres service. It remains empty; no isolated staging deployment or production-data mutation occurred.
-- Existing crawl orchestration can still outlast the UI polling window when three jobs run serially, stops polling on a transient status-request failure, and may not persist the original direct-PDF query as searchable metadata. These are follow-up release risks outside this bounded authentication/download fix.
+- Existing crawl orchestration can still outlast the UI polling window when three jobs run serially and stops polling on a transient status-request failure. Persisting the original query as document metadata is intentionally unnecessary: the job-result ledger now supplies exact completed downloads without weakening metadata provenance.

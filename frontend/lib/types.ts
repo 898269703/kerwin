@@ -19,6 +19,15 @@ export interface SearchResult {
 export type CrawlJobStatus = 'queued' | 'running' | 'succeeded' | 'partial' | 'failed';
 export type CrawlState = 'not_needed' | 'started' | 'running' | 'complete' | 'unavailable';
 
+export interface CrawlDocument {
+  id: string;
+  title: string;
+  filename?: string | null;
+  documentNumber?: string | null;
+  byteSize: number;
+  sourceCount: number;
+}
+
 export interface CrawlJob {
   id: string;
   startUrl: string;
@@ -30,6 +39,7 @@ export interface CrawlJob {
   errorsCount: number;
   errorSummary?: string | null;
   reused?: boolean;
+  documents?: CrawlDocument[];
 }
 
 export interface CrawlInfo {

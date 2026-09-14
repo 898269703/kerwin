@@ -11,11 +11,11 @@ const examples = [
 ];
 
 type CrawlView =
-  | { kind: 'queued'; pages: 0; pdfs: 0 }
-  | { kind: 'running'; pages: number; pdfs: number }
-  | { kind: 'hit'; pages: number; pdfs: number }
-  | { kind: 'no-hit'; pages: number; pdfs: number }
-  | { kind: 'unavailable'; pages: number; pdfs: number };
+  | { kind: 'queued'; pages: 0; pdfs: 0; downloads: 0 }
+  | { kind: 'running'; pages: number; pdfs: number; downloads: number }
+  | { kind: 'hit'; pages: number; pdfs: number; downloads: number }
+  | { kind: 'no-hit'; pages: number; pdfs: number; downloads: number }
+  | { kind: 'unavailable'; pages: number; pdfs: number; downloads: number };
 
 type StatusResponse = {
   state: 'running' | 'complete';
@@ -29,9 +29,21 @@ function aggregateProgress(jobs: CrawlJob[]) {
     (sum, job) => ({
       pages: sum.pages + job.pagesFetched,
       pdfs: sum.pdfs + job.filesDiscovered,
+      downloads: sum.downloads + job.filesDownloaded,
     }),
-    { pages: 0, pdfs: 0 },
+    { pages: 0, pdfs: 0, downloads: 0 },
   );
+}
+
+function jobForResult(result: SearchResult, jobs: CrawlJob[] | undefined): CrawlJob | undefined {
+  const url = result.finalUrl || result.url;
+  return url ? jobs?.find((job) => job.startUrl === url) : undefined;
+}
+
+function jobCopy(job: CrawlJob): string {
+  if (job.status === 'queued' || job.status === 'running') return '正在收录 PDF';
+  if (job.filesDownloaded > 0) return '已收录，可在本站结果下载';
+  return '未发现可收录 PDF';
 }
 
 function mergeWarnings(current: string[] | undefined, incoming: string[] | undefined) {
@@ -67,6 +79,7 @@ export default function Page() {
         kind: 'unavailable',
         pages: view?.pages ?? 0,
         pdfs: view?.pdfs ?? 0,
+        downloads: view?.downloads ?? 0,
       }));
       return;
     }
@@ -95,6 +108,7 @@ export default function Page() {
             const libraryResults = payload.libraryResults ?? [];
             return {
               ...current,
+              crawl: current.crawl ? { ...current.crawl, state: 'complete', jobs: payload.jobs } : current.crawl,
               results: libraryResults.length > 0
                 ? mergePostCrawlResults(libraryResults, current.results)
                 : current.results,
@@ -110,6 +124,7 @@ export default function Page() {
 
         setData((current) => current ? {
           ...current,
+          crawl: current.crawl ? { ...current.crawl, state: 'running', jobs: payload.jobs } : current.crawl,
           warnings: mergeWarnings(current.warnings, payload.warnings),
         } : current);
         setCrawlView({ kind: 'running', ...progress });
@@ -120,6 +135,7 @@ export default function Page() {
           kind: 'unavailable',
           pages: view?.pages ?? 0,
           pdfs: view?.pdfs ?? 0,
+          downloads: view?.downloads ?? 0,
         }));
       }
     }, delay);
@@ -150,10 +166,10 @@ export default function Page() {
       setData(payload);
       const jobs = payload.crawl?.jobs ?? [];
       if (payload.crawl?.state === 'started' && jobs.length > 0) {
-        setCrawlView({ kind: 'queued', pages: 0, pdfs: 0 });
+        setCrawlView({ kind: 'queued', pages: 0, pdfs: 0, downloads: 0 });
         schedulePoll(value, jobs.map((job) => job.id), generation, Date.now());
       } else if (payload.crawl?.state === 'unavailable') {
-        setCrawlView({ kind: 'unavailable', pages: 0, pdfs: 0 });
+        setCrawlView({ kind: 'unavailable', pages: 0, pdfs: 0, downloads: 0 });
       }
     } catch (err) {
       if (generation === generationRef.current) {
@@ -165,8 +181,8 @@ export default function Page() {
   }
 
   function crawlCopy(view: CrawlView) {
-    if (view.kind === 'queued') return '正在准备深度查找…';
-    if (view.kind === 'running') return `正在抓取公开来源：已检查 ${view.pages} 个页面，发现 ${view.pdfs} 个 PDF`;
+    if (view.kind === 'queued') return '正在准备深度查找：验证公开来源并收录 PDF，完成后提供本站下载。';
+    if (view.kind === 'running') return `正在抓取公开来源：已检查 ${view.pages} 个页面，发现 ${view.pdfs} 个 PDF，已收录 ${view.downloads} 个`;
     if (view.kind === 'hit') return '已找到并收录新的 PDF，可直接从本站下载。';
     if (view.kind === 'no-hit') return '深度查找已完成，暂未发现新的可下载 PDF。';
     return '深度查找暂时不可用，已保留当前互联网搜索结果。';
@@ -230,7 +246,12 @@ export default function Page() {
                   <a href={`/api/library/file?id=${encodeURIComponent(result.libraryId)}&download=1`}>下载</a>
                 </>
               ) : (
-                <a className="primary" href={result.finalUrl || result.url} target="_blank" rel="noreferrer">打开来源</a>
+                <>
+                  <a className="primary" href={result.finalUrl || result.url} target="_blank" rel="noreferrer">打开来源</a>
+                  {jobForResult(result, data.crawl?.jobs) && (
+                    <span className="crawl-action-status">{jobCopy(jobForResult(result, data.crawl?.jobs)!)}</span>
+                  )}
+                </>
               )}
             </div>
           </article>

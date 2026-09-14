@@ -29,6 +29,31 @@ class FakeRepo:
             }
         return None
 
+    async def get_crawl_job(self, job_id: str):
+        if job_id != "11111111-1111-1111-1111-111111111111":
+            return None
+        return {
+            "id": job_id,
+            "seedSiteId": None,
+            "triggerType": "discovery",
+            "startUrl": "https://example.gov/a.pdf",
+            "status": "succeeded",
+            "pagesFetched": 0,
+            "filesDiscovered": 1,
+            "filesDownloaded": 1,
+            "duplicatesFound": 0,
+            "errorsCount": 0,
+            "errorSummary": None,
+            "documents": [{
+                "id": "51957b6f-1111-2222-3333-444444444444",
+                "title": "html40.pdf",
+                "filename": "html40.pdf",
+                "documentNumber": None,
+                "byteSize": 2136233,
+                "sourceCount": 1,
+            }],
+        }
+
     async def list_seed_sites(self):
         return [{
             "id": "seed-1",
@@ -169,6 +194,18 @@ def test_management_routes_require_bearer_token():
     r = client().get("/v1/seeds")
     assert r.status_code == 401
     assert r.json()["error"] == "unauthorized"
+
+
+def test_crawl_job_status_includes_downloaded_documents():
+    response = client().get(
+        "/v1/crawl/jobs/11111111-1111-1111-1111-111111111111",
+        headers=auth(),
+    )
+
+    assert response.status_code == 200
+    document = response.json()["job"]["documents"][0]
+    assert document["id"] == "51957b6f-1111-2222-3333-444444444444"
+    assert document["filename"] == "html40.pdf"
 
 
 def test_management_routes_accept_verified_vercel_oidc():

@@ -355,7 +355,45 @@ class Repository:
             )
 
     async def get_crawl_job(self, job_id: str):
-        return self._job(await self.db.fetch_one("SELECT * FROM crawl_jobs WHERE id=%s LIMIT 1", (job_id,)))
+        job = self._job(await self.db.fetch_one("SELECT * FROM crawl_jobs WHERE id=%s LIMIT 1", (job_id,)))
+        if job:
+            job["documents"] = await self.list_crawl_job_documents(job_id)
+        return job
+
+    async def list_crawl_job_documents(self, job_id: str):
+        rows = await self.db.fetch_all(
+            """
+            SELECT d.*, COUNT(ds.id)::int AS source_count
+            FROM crawl_job_documents cjd
+            JOIN documents d ON d.id=cjd.document_id
+            LEFT JOIN document_sources ds ON ds.document_id=d.id
+            WHERE cjd.crawl_job_id=%s
+            GROUP BY d.id, cjd.created_at
+            ORDER BY cjd.created_at ASC
+            """,
+            (job_id,),
+        )
+        return [
+            {
+                "id": str(row["id"]),
+                "title": row.get("preferred_title") or row.get("preferred_filename") or row.get("document_number") or "未命名 PDF",
+                "filename": row.get("preferred_filename"),
+                "documentNumber": row.get("document_number"),
+                "byteSize": int(row.get("byte_size") or 0),
+                "sourceCount": int(row.get("source_count") or 0),
+            }
+            for row in rows
+        ]
+
+    async def link_crawl_job_document(self, *, job_id: str, document_id: str):
+        await self.db.execute(
+            """
+            INSERT INTO crawl_job_documents (crawl_job_id,document_id)
+            VALUES (%s,%s)
+            ON CONFLICT (crawl_job_id,document_id) DO NOTHING
+            """,
+            (job_id, document_id),
+        )
 
     async def fail_interrupted_jobs(self):
         message = "worker restarted before completion"
