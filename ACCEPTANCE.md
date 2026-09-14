@@ -1,6 +1,6 @@
 # PDF Finder acceptance record
 
-Iteration: 2026-09-12, frontend PDF proxy OIDC compatibility. This record separates current-run evidence from historical checkpoints and keeps the Preview and production gates open until their own checks pass.
+Iteration: 2026-09-12 through 2026-09-14, frontend PDF proxy OIDC compatibility and production release. This record separates current-run evidence from historical checkpoints and records the bounded release independently from the wider crawler acceptance contract.
 
 ## Stage scope and evidence
 
@@ -9,18 +9,18 @@ Iteration: 2026-09-12, frontend PDF proxy OIDC compatibility. This record separa
 | Product | Root `PRODUCT.md`, `USER_FLOW.md`, `DATA_MODEL.md`; linked existing specs/plans | Bounded contract defined; proceed. |
 | UX / Design System | Reuse current `frontend/app/page.tsx` and `globals.css`; no visual redesign | Existing implementation reused; desktop and 390 x 844 screenshot inspection passed. |
 | Figma / Pixso | No editable-design work in the download-route fix | Not applicable. |
-| MCP / external context | ChatGPT project history, GitHub remote, Vercel project, and Railway service state inspected | Current project ownership and deployment split verified without changing production. |
+| MCP / external context | ChatGPT project history, GitHub remote, Vercel project, and Railway service state inspected | Current project ownership and deployment split verified; the reviewed release was deployed to both providers. |
 | Implementation | File proxy shares existing server auth/base behavior; no schema/API shape change | Implemented on `codex/pdf-download-oidc-20260912`; focused tests cover the changed paths. |
 | Run App | Next.js dev server at `http://127.0.0.1:3210` | Known-library query returned the expected PDF result. |
 | Screenshot Visual QA | Desktop and 390 x 844 local-browser inspection | Passed for header, search field, examples, result card, preview/download actions, and console errors. |
-| Tests / build | Commands and cases below | Frontend 33 tests/build/typecheck and worker 105 tests passed in this run. |
-| Production readiness | Preserve production until Preview acceptance; no production cutover in this iteration | Whole-product production gate remains open. |
+| Tests / build | Commands and cases below | Frontend 33 tests/build/typecheck and worker 108 tests passed in this run and in provider builds. |
+| Production readiness | Preview acceptance, merge, provider builds, live health, same-origin PDF bytes, and production browser search | The authentication/download slice is live and verified; the wider crawler contract remains open. |
 
 ## Required checks for this fix
 
 - [x] Reproduce the original missing-OIDC failure with the targeted route test, then show the corrected test passes.
 - [x] Explicit crawler base/API token still work and take precedence over OIDC; only server-to-worker requests contain authorization.
-- [x] OIDC-only unit coverage uses the existing worker default and the current request-context token. Real Preview OIDC remains a separate deployment check.
+- [x] OIDC-only unit coverage uses the existing worker default and the current request-context token; Preview and production OIDC file downloads both returned the expected PDF bytes.
 - [x] Invalid UUID returns 400 without fetching; absent credentials fail closed; missing upstream file returns 404; upstream failure/non-PDF content remains a controlled error.
 - [x] Inline and `download=1` behavior, safe ASCII/Unicode filenames, PDF content type, security/cache headers, and byte integrity remain compatible.
 - [x] Run from `frontend/`: focused tests, full test/build, and `npx tsc --noEmit` passed. Exact totals are recorded below.
@@ -43,7 +43,7 @@ The existing specs/plans are scope references, not evidence that all their check
 
 ## Current-run evidence
 
-Source checkout: public GitHub repository `898269703/kerwin`, base `bd4b782`, isolated branch `codex/pdf-download-oidc-20260912`. The unrelated dirty `Ai技经` workbench was not edited.
+Source checkout: public GitHub repository `898269703/kerwin`, initial base `bd4b782`, implementation branch `codex/pdf-download-oidc-20260912`. PR `#1` merged into `crawler-mvp` as `b7f0888c2b5ac8839b45a1f19a5c3e8bf5e3a74f`. The unrelated dirty `Ai技经` workbench was not edited.
 
 - `npm test -- library-file-route.test.ts crawler-client.test.ts`: 12 passed after the new tests first reproduced missing request-context OIDC support, Unicode filename handling, and unsanitized network failures.
 - `npm run build`: 10 test files and 33 tests passed; Next.js 16.3.3 production build and route generation passed.
@@ -56,14 +56,17 @@ Source checkout: public GitHub repository `898269703/kerwin`, base `bd4b782`, is
 - Existing live Railway worker, read-only verification: `/health` returned `{"ok":true}`; public search found the same document; PDF GET returned HTTP 200, `application/pdf`, 2,136,233 bytes, `%PDF-`, and SHA256 `49e01b35fa91aa9592ecef9dae362ddb60e217d21e59646bb19b52f806a8bbe0`.
 - Codex Security diff scan `c6730e42-8391-4655-9732-aba0f4ce2940`: completed over four authentication/download surfaces with zero reportable findings. The scan records Preview OIDC verification as the remaining open question.
 - Vercel Preview `dpl_7hrQrQbwfYeKrYrfNv6cb4NhFfog`, `https://pdf-search-bwcy9pg8c-kerwin98.vercel.app`: `READY`, `target: null`, no alias, 33 Vercel-build tests passed, and the Next.js build completed. Browser search returned the known library result; same-origin download produced `/Users/k/Downloads/html40.pdf`, 2,136,233 bytes, `%PDF-1.1`, and the exact worker SHA256 above. No Preview-origin console warnings/errors were recorded.
-- The inspected Preview HTML contained no `CRAWLER_API_TOKEN`, `VERCEL_OIDC_TOKEN`, OIDC header name, or bearer value. Production was not redeployed or aliased during this iteration.
-- Railway production configuration was rechecked after an operator-approved discard: the unrelated staged `npm start` and old `4baa38b` commit settings are gone, `staged` is `null`, and the running worker remains on the successful deployment `3f81a0d5-fdb2-42d2-b949-bec40cbf6da9`. Its committed start command is the Uvicorn command and its source remains commit `1afdc33`; discarding the staged settings did not redeploy the service.
-- Draft PR `#1` is mergeable at `a87ea82`. GitHub checks `PDF Finder Frontend CI / test-build` and `Scrapling Worker CI / test` both passed.
+- The inspected Preview HTML contained no `CRAWLER_API_TOKEN`, `VERCEL_OIDC_TOKEN`, OIDC header name, or bearer value.
+- Before release, Railway production configuration was rechecked after an operator-approved discard: the unrelated staged `npm start` and old `4baa38b` commit settings were gone, `staged` was `null`, and the then-running worker remained on successful deployment `3f81a0d5-fdb2-42d2-b949-bec40cbf6da9`. Its committed start command was the Uvicorn command and its source remained commit `1afdc33`; discarding the staged settings did not redeploy the service.
+- PR `#1` merged at `b7f0888`; GitHub checks `PDF Finder Frontend CI / test-build` and `Scrapling Worker CI / test` passed before and after the merge.
+- Railway production deployment `0a63566f-27b6-4852-b7bd-74078022fe58` completed successfully from the reviewed implementation tree, whose frontend and worker contents match merge commit `b7f0888`. Its build ran 108 worker tests, `compileall`, and dynamic verification; `/health` passed during deployment and `https://crawler-worker-production.up.railway.app/health` returned `{"ok":true}` afterward. A preceding CLI deployment `559ef54b-0ece-4bbf-a35f-2195a5201aeb` failed before build because the upload started below the configured `scrapling-worker` source root; redeploying from the repository root corrected it without replacing the healthy production instance during the failed attempt.
+- The newly deployed worker served the known PDF with HTTP 200, 2,136,233 bytes, `%PDF-1.1`, and SHA256 `49e01b35fa91aa9592ecef9dae362ddb60e217d21e59646bb19b52f806a8bbe0` through a Vercel OIDC-authenticated Preview request.
+- Vercel production deployment `dpl_5u2XxLmvh2HnR4q5ucETUq3GJbiy` is `READY` and aliased to `https://pdf-search-pwa.vercel.app`. Its build passed 10 files / 33 tests, TypeScript checking, and the Next.js production build; no runtime errors were reported in the first 30 minutes.
+- Production browser search for `html40.pdf` returned exactly one verified library result with visible preview/download actions and no observed clipping or overlap. The production same-origin download returned HTTP 200, `application/pdf`, 2,136,233 bytes, `%PDF-1.1`, the same SHA256, `nosniff`, and a compatible ASCII plus UTF-8 content-disposition filename.
 
 ## Remaining release work and risks
 
-- Preview runtime acceptance passed for frontend commit `9b42c9d`; production has not been changed.
 - Preview deployment `dpl_6WFoX81UdK6SJ6CSKfy12fNJryKV` was confirmed as `target: null` and failed before runtime with `BUILD_UTILS_SPAWN_1`; it is retained as evidence for the production-environment test-mode fix and is not a passed Preview.
-- The Unicode worker response fix and OIDC-only startup mode have automated coverage but are not live until the Railway worker is deployed from the reviewed PR. The unrelated Railway staged settings were discarded and independently verified absent before release promotion.
+- Railway currently reports `GitHub Repo not found` for the service connection, so repository-driven automatic worker deployments are not restored. This release used the official Railway CLI with the exact project, environment, and service selected.
 - A separate Railway staging project was created, but the Trial resource limit rejected its Postgres service. It remains empty; no isolated staging deployment or production-data mutation occurred.
 - Existing crawl orchestration can still outlast the UI polling window when three jobs run serially, stops polling on a transient status-request failure, and may not persist the original direct-PDF query as searchable metadata. These are follow-up release risks outside this bounded authentication/download fix.
