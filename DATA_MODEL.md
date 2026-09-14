@@ -17,7 +17,9 @@ Source of truth: [`scrapling-worker/migrations/001_init.sql`](scrapling-worker/m
 
 `SearchResult` holds origin (`library`/`web`), source class, verified flag, score, title, source, snippet, reasons, content length, optional URL/final URL, and optional library UUID. Scores and counters come from existing deterministic logic/worker data; do not invent successful ingestion.
 
-`SearchResponse` contains query, results, optional warnings, and optional crawl metadata. Crawl states are `not_needed`, `started`, `running`, `complete`, and `unavailable`. Frontend `CrawlJobStatus` currently represents `queued`, `running`, `succeeded`, `partial`, and `failed`; SQL also permits `cancelled`. A polled job can include the library-safe metadata of its linked documents, allowing the UI to expose preview/download without depending on a second fuzzy query match.
+`SearchResponse` contains query, library-first results, optional warnings, and optional crawl metadata. Search returns `not_started` when selectable web candidates exist and creates no job. Other crawl states are `not_needed`, `started`, `running`, `complete`, and `unavailable`. Frontend `CrawlJobStatus` represents `queued`, `running`, `succeeded`, `partial`, and `failed`; SQL also permits `cancelled`. A polled job can include the library-safe metadata of its linked documents, allowing the UI to expose preview/download without depending on a second fuzzy query match.
+
+The manual start request is an ephemeral browser-to-server command containing the current query and one to three unique selected source URLs. It is not a persisted domain entity. Successful submission creates the existing discovery `crawl_jobs`; the selection itself is local UI state and is cleared by a new search or a terminal batch.
 
 The download request contains only a document UUID and optional `download=1`. Server configuration chooses a worker base and authentication token; neither the token nor its claims become document fields, browser payloads, or persisted frontend state. The response preserves the PDF byte content, safe filename, content type, disposition, and existing cache/security headers.
 

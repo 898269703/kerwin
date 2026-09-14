@@ -99,4 +99,18 @@ Source checkout: public GitHub repository `898269703/kerwin`, initial base `bd4b
 - Railway currently reports `GitHub Repo not found` for the service connection, so repository-driven automatic worker deployments are not restored. This release used the official Railway CLI with the exact project, environment, and service selected.
 - A separate Railway staging project was created, but the Trial resource limit rejected its Postgres service. It remains empty; no isolated staging deployment or production-data mutation occurred.
 - Existing crawl orchestration can still outlast the UI polling window when three jobs run serially and stops polling on a transient status-request failure. Persisting the original query as document metadata is intentionally unnecessary: the job-result ledger now supplies exact completed downloads without weakening metadata provenance.
-- A CLI invocation before the correct Vercel project link was restored created an unused `kerwin98/frontend` project and deployment. It never received the `pdf-search-pwa` production alias or affected the production application. Automated approval rejected permanent project deletion; explicit destructive cleanup authorization remains required.
+- A CLI invocation before the correct Vercel project link was restored created an unused `kerwin98/frontend` project and deployment. It never received the `pdf-search-pwa` production alias or affected the production application. The user explicitly authorized cleanup on 2026-09-14, and `vercel project rm frontend --scope kerwin98` removed it successfully.
+
+## 2026-09-14 user-selected crawl workflow
+
+This bounded iteration supersedes automatic search-triggered ingestion. Existing Worker crawling, job-document linkage, authenticated PDF delivery, and security validation remain unchanged.
+
+- [x] Product contract updated: every search returns library-first and public-web candidates without creating crawl jobs; users select one to three sources and explicitly start a batch.
+- [x] Manual crawl API rejects invalid query, duplicate/invalid/private URL, batches over three, and URLs absent from the current server-verified web candidates; it submits only selected URLs and does not expose Worker failures or credentials.
+- [x] UI shows selected count, a disabled/enabled start action, independent job states, and real page/PDF/persisted counters without a fabricated percentage.
+- [x] New searches clear selection and invalidate older frontend polling; transient status failures retry and terminal jobs promote exact linked documents to preview/download cards.
+- [x] Full frontend test suite passed: 11 files / 40 tests. `npx tsc --noEmit` and the Next.js 16.3.3 production build passed; `/api/crawl` was emitted as a dynamic route.
+- [x] Local production-server QA with deterministic search/Worker doubles passed on desktop and 390 x 844 for candidate, selected, queued/running counters, and completed preview/download states. Controls and text remained visible without overlap; browser warning/error logs were empty.
+- [x] Latest production build runtime smoke returned four candidates with `crawl.state=not_started` and zero jobs, started exactly one selected candidate, and rejected an unrelated public URL with HTTP 400 before Worker submission.
+- [ ] Vercel Preview proves search causes no Worker job, selected-source submission starts only the chosen source, progress updates, and a resulting PDF previews/downloads.
+- [ ] Reviewed branch merges with required checks, production deploy reaches READY, and the same real user path passes at `https://pdf-search-pwa.vercel.app`.
